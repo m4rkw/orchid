@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api/client";
 import { OnboardingChat } from "./components/onboarding/OnboardingChat";
-import { SessionPlaceholder } from "./components/session/SessionPlaceholder";
+import { NewSessionComposer } from "./components/session/NewSessionComposer";
+import { SessionView } from "./components/session/SessionView";
 import { ProjectTree } from "./components/tree/ProjectTree";
 import { useAppStore } from "./state/stores";
 
@@ -46,8 +47,10 @@ export default function App() {
           <ProjectTree />
         </aside>
         <main className="min-w-0 flex-1 overflow-hidden">
-          {selected?.pid && selected.sid ? (
-            <SessionPlaceholder pid={selected.pid} sid={selected.sid} />
+          {selected?.sid ? (
+            <SessionView key={selected.sid} pid={selected.pid} sid={selected.sid} />
+          ) : selected?.compose ? (
+            <NewSessionComposer key={selected.pid} pid={selected.pid} />
           ) : (
             <OnboardingChat />
           )}

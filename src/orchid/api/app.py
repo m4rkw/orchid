@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from .. import __version__
 from ..bus import EventBus
 from ..claude.catalog import Catalog
+from ..claude.driver_manager import DriverManager
 from ..claude.onboarding import build_onboarding_driver
 from ..claude.runner import Runner, SdkRunner
 from ..claude.transcript import TranscriptCache
@@ -16,7 +17,7 @@ from ..config import Settings
 from ..services import ApiError, ProjectService, SessionService
 from ..store.registry import Registry
 from ..watch.watcher import WatcherManager
-from . import onboarding_api, projects, sessions, ws
+from . import onboarding_api, permissions, projects, sessions, ws
 
 _FALLBACK_HTML = """<!doctype html><html><body style="font-family: ui-monospace, monospace;
 background:#0b0b0f; color:#d4d4d8; display:grid; place-items:center; height:100vh; margin:0">
@@ -50,7 +51,12 @@ def create_app(settings: Settings | None = None, runner: Runner | None = None) -
         session_service = SessionService(registry, catalog, cache, bus, settings)
         watcher = WatcherManager(catalog, session_service, settings)
         service = ProjectService(registry, catalog, bus, settings, observers=[watcher])
-        onboarding = build_onboarding_driver(runner or SdkRunner(), bus, service, settings)
+        active_runner = runner or SdkRunner()
+        onboarding = build_onboarding_driver(active_runner, bus, service, settings)
+        driver_manager = DriverManager(active_runner, bus, cache, session_service, watcher, settings)
+        session_service.is_running = driver_manager.is_running
+        service.is_running = driver_manager.is_running
+        app.state.driver_manager = driver_manager
         app.state.settings = settings
         app.state.bus = bus
         app.state.catalog = catalog
@@ -63,6 +69,7 @@ def create_app(settings: Settings | None = None, runner: Runner | None = None) -
         app.state.claude_cli_version = await _claude_cli_version()
         await watcher.start(registry.list())
         yield
+        await driver_manager.aclose()
         await watcher.aclose()
         await onboarding.aclose()
 
@@ -89,6 +96,7 @@ def create_app(settings: Settings | None = None, runner: Runner | None = None) -
     app.include_router(projects.router, prefix="/api")
     app.include_router(sessions.router, prefix="/api")
     app.include_router(onboarding_api.router, prefix="/api")
+    app.include_router(permissions.router, prefix="/api")
     app.include_router(ws.router)
 
     if settings.web_dist.is_dir():

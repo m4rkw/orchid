@@ -20,6 +20,41 @@ export type SessionSummary = {
   created_by: "orchid" | "external";
 };
 
+export type SessionDetail = SessionSummary & {
+  project_id: string;
+  handoff_command: string;
+};
+
+export type AgentStatus = "running" | "done";
+
+export type AgentInfo = {
+  agent_id: string;
+  message_count: number;
+  status: AgentStatus;
+};
+
+/** Payload of a `permission_request` WS event. */
+export type PermissionRequest = {
+  request_id: string;
+  tool_name: string;
+  input_preview: string;
+  display_name?: string;
+  description?: string;
+  expires_at: string;
+};
+
+/** Response of GET /api/sessions/{sid}/messages; `seq` is the WS replay watermark. */
+export type MessagesResponse = {
+  messages: NormalizedMessage[];
+  seq: number;
+};
+
+/** 202 response of POST /api/sessions/{sid}/prompt. */
+export type PromptAccepted = {
+  state: string;
+  queue_len: number;
+};
+
 export type Block = {
   type: "text" | "thinking" | "tool_use" | "tool_result";
   text?: string;

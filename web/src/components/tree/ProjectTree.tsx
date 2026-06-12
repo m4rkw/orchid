@@ -132,6 +132,19 @@ function ProjectRow({
         </span>
         <button
           type="button"
+          title="New session"
+          aria-label={`New session in ${project.name}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            closeMenu();
+            useAppStore.getState().select({ pid: project.id, compose: true });
+          }}
+          className="shrink-0 rounded p-0.5 leading-none text-zinc-500 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-zinc-800 hover:text-violet-300 focus-visible:opacity-100"
+        >
+          +
+        </button>
+        <button
+          type="button"
           aria-label={`Project menu for ${project.name}`}
           onClick={(e) => {
             e.stopPropagation();

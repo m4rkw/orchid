@@ -27,25 +27,35 @@ def settings(homes) -> Settings:
 
 
 class FakeClient:
-    """Scripted RunnerClient: each turn is a list of SDK messages (or an Exception to raise)."""
+    """Scripted RunnerClient: each turn is a list of SDK messages, an Exception
+    to raise, or an asyncio.Event gate (stream blocks until set; interrupt sets it)."""
 
     def __init__(self, turns: list[list[Any]]):
         self.turns = list(turns)
         self.queries: list[str] = []
         self.interrupted = False
         self.closed = False
+        self._gates: list = []
 
     async def query(self, prompt: str, session_id: str = "default") -> None:
         self.queries.append(prompt)
 
     async def receive_response(self):
+        import asyncio
+
         for item in self.turns.pop(0):
             if isinstance(item, Exception):
                 raise item
+            if isinstance(item, asyncio.Event):
+                self._gates.append(item)
+                await item.wait()
+                continue
             yield item
 
     async def interrupt(self) -> None:
         self.interrupted = True
+        for gate in self._gates:
+            gate.set()
 
 
 class FakeRunner:

@@ -23,6 +23,20 @@ def _iso(value: Any) -> str | None:
     return str(value)
 
 
+def age_seconds(last_modified: Any) -> float | None:
+    """Age of an SDKSessionInfo.last_modified value (datetime | epoch s/ms | iso str)."""
+    iso = _iso(last_modified)
+    if iso is None:
+        return None
+    try:
+        ts = datetime.fromisoformat(iso)
+    except ValueError:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - ts).total_seconds()
+
+
 def map_summary(info: Any, flags: dict[str, Any]) -> SessionSummary:
     """Pure mapping from SDKSessionInfo (+ Orchid flags) to the wire model."""
     title = info.custom_title or info.summary

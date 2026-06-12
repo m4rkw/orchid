@@ -1,4 +1,13 @@
-import type { Health, Project, SessionSummary } from "./types";
+import type {
+  AgentInfo,
+  Health,
+  MessagesResponse,
+  NormalizedMessage,
+  Project,
+  PromptAccepted,
+  SessionDetail,
+  SessionSummary,
+} from "./types";
 
 /** Normalized API error: carries HTTP status plus the backend's {error:{code,message}} body when present. */
 export class ApiError extends Error {
@@ -63,6 +72,47 @@ export const api = {
 
   sessions: (pid: string) =>
     request<SessionSummary[]>(`/api/projects/${encodeURIComponent(pid)}/sessions`),
+
+  createSession: (pid: string, prompt: string) =>
+    request<{ session_id: string }>(`/api/projects/${encodeURIComponent(pid)}/sessions`, {
+      method: "POST",
+      body: JSON.stringify({ prompt }),
+    }),
+
+  session: (sid: string) => request<SessionDetail>(`/api/sessions/${encodeURIComponent(sid)}`),
+
+  sessionMessages: (sid: string) =>
+    request<MessagesResponse>(`/api/sessions/${encodeURIComponent(sid)}/messages`),
+
+  sessionMessage: (sid: string, uuid: string) =>
+    request<NormalizedMessage>(
+      `/api/sessions/${encodeURIComponent(sid)}/messages/${encodeURIComponent(uuid)}`,
+    ),
+
+  sessionAgents: (sid: string) =>
+    request<AgentInfo[]>(`/api/sessions/${encodeURIComponent(sid)}/agents`),
+
+  agentMessages: (sid: string, aid: string) =>
+    request<{ messages: NormalizedMessage[] }>(
+      `/api/sessions/${encodeURIComponent(sid)}/agents/${encodeURIComponent(aid)}/messages`,
+    ),
+
+  sendPrompt: (sid: string, prompt: string, force?: boolean) =>
+    request<PromptAccepted>(`/api/sessions/${encodeURIComponent(sid)}/prompt`, {
+      method: "POST",
+      body: JSON.stringify(force === undefined ? { prompt } : { prompt, force }),
+    }),
+
+  interrupt: (sid: string) =>
+    request<Record<string, never>>(`/api/sessions/${encodeURIComponent(sid)}/interrupt`, {
+      method: "POST",
+    }),
+
+  respondPermission: (requestId: string, behavior: "allow" | "deny") =>
+    request<Record<string, never>>(`/api/permissions/${encodeURIComponent(requestId)}`, {
+      method: "POST",
+      body: JSON.stringify({ behavior }),
+    }),
 
   onboardingPrompt: (prompt: string) =>
     request<Record<string, never>>("/api/onboarding/prompt", {

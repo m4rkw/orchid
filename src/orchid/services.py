@@ -41,6 +41,7 @@ class ProjectService:
         self._bus = bus
         self._settings = settings
         self._observers = observers if observers is not None else []
+        self.is_running: Any = None  # wired to DriverManager.is_running at app startup
 
     async def create(self, path: str, name: str | None = None) -> tuple[Project, bool]:
         root = canonicalize(path)
@@ -84,7 +85,10 @@ class ProjectService:
         flags = project_store.get_session_flags(root)
         summaries = await self._catalog.list_sessions(root, flags)
         for s in summaries:
-            s.status = status_from_updated(s.updated_at, self._settings.external_window_s)
+            if self.is_running and self.is_running(s.id):
+                s.status = "running"
+            else:
+                s.status = status_from_updated(s.updated_at, self._settings.external_window_s)
         summaries.sort(key=lambda s: s.updated_at or "", reverse=True)
         summaries.sort(key=lambda s: not s.pinned)
         return summaries
@@ -134,6 +138,7 @@ class SessionService:
         self._bus = bus
         self._settings = settings
         self._locations: dict[str, str] = {}  # session_id -> project_id
+        self.is_running: Any = None  # wired to DriverManager.is_running at app startup
 
     async def locate(self, session_id: str) -> tuple[dict, Any]:
         """Find which onboarded project a session belongs to -> (registry entry, SDKSessionInfo)."""
@@ -150,7 +155,10 @@ class SessionService:
     def _summary(self, session_id: str, info: Any, root: Path) -> SessionSummary:
         flags = project_store.get_session_flags(root).get(session_id, {})
         summary = map_summary(info, flags)
-        summary.status = status_from_updated(summary.updated_at, self._settings.external_window_s)
+        if self.is_running and self.is_running(session_id):
+            summary.status = "running"
+        else:
+            summary.status = status_from_updated(summary.updated_at, self._settings.external_window_s)
         summary.message_count = self._cache.message_count(session_id)
         return summary
 
