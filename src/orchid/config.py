@@ -10,6 +10,7 @@ class Settings:
     host: str = "127.0.0.1"
     port: int = 4242
     block_preview_cap: int = 16384
+    external_window_s: float = 45.0
 
     @classmethod
     def from_env(cls) -> "Settings":

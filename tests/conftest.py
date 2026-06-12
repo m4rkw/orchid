@@ -72,7 +72,7 @@ def fake_runner():
 
 
 @pytest.fixture
-def server(homes):
+def server_app(homes):
     """Live uvicorn server on an ephemeral port; REST exercised with requests."""
     from orchid.api.app import create_app
 
@@ -87,6 +87,11 @@ def server(homes):
             raise RuntimeError("test server failed to start")
         time.sleep(0.01)
     port = srv.servers[0].sockets[0].getsockname()[1]
-    yield f"http://127.0.0.1:{port}"
+    yield SimpleNamespace(url=f"http://127.0.0.1:{port}", app=app)
     srv.should_exit = True
     thread.join(timeout=5)
+
+
+@pytest.fixture
+def server(server_app) -> str:
+    return server_app.url

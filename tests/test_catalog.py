@@ -49,3 +49,9 @@ async def test_list_sessions_empty_project(homes, tmp_path):
     root = tmp_path / "fresh"
     root.mkdir()
     assert await Catalog().list_sessions(root, {}) == []
+
+
+def test_timestamps_epoch_millis():
+    s = map_summary(_info(last_modified=1781234567890, created_at=1781234560.0), {})
+    assert s.updated_at.startswith("2026-06-")
+    assert s.created_at.startswith("2026-06-")

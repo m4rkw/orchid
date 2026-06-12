@@ -51,7 +51,8 @@ def normalize_stream_message(msg: Any, cap: int = PREVIEW_CAP) -> NormalizedMess
         blocks: list[Block] = []
         for b in msg.content:
             if isinstance(b, TextBlock) and b.text:
-                blocks.append(Block(type="text", text=b.text))
+                text, truncated = _preview(b.text, cap)
+                blocks.append(Block(type="text", text=text, truncated=truncated))
             elif isinstance(b, ThinkingBlock) and b.thinking:
                 text, truncated = _preview(b.thinking, cap)
                 blocks.append(Block(type="thinking", text=text, truncated=truncated))
@@ -102,3 +103,100 @@ def normalize_stream_message(msg: Any, cap: int = PREVIEW_CAP) -> NormalizedMess
         )
 
     return None  # StreamEvent / RateLimitEvent etc. arrive in M3
+
+
+def _blocks_from_raw_content(content: Any, cap: int) -> list[Block]:
+    if isinstance(content, str):
+        text, truncated = _preview(content, cap)
+        return [Block(type="text", text=text, truncated=truncated)] if content else []
+    blocks: list[Block] = []
+    if not isinstance(content, list):
+        return blocks
+    for b in content:
+        if not isinstance(b, dict):
+            continue
+        btype = b.get("type")
+        if btype == "text" and b.get("text"):
+            text, truncated = _preview(b["text"], cap)
+            blocks.append(Block(type="text", text=text, truncated=truncated))
+        elif btype == "thinking" and b.get("thinking"):
+            text, truncated = _preview(b["thinking"], cap)
+            blocks.append(Block(type="thinking", text=text, truncated=truncated))
+        elif btype == "tool_use":
+            preview, truncated = _preview(b.get("input", {}), cap)
+            blocks.append(
+                Block(type="tool_use", id=b.get("id"), name=b.get("name", "?"),
+                      input_preview=preview, truncated=truncated)
+            )
+        elif btype == "tool_result":
+            preview, truncated = _preview(_result_content_text(b.get("content")), cap)
+            blocks.append(
+                Block(type="tool_result", tool_use_id=b.get("tool_use_id"),
+                      content_preview=preview, is_error=bool(b.get("is_error")), truncated=truncated)
+            )
+    return blocks
+
+
+def normalize_record(rec: Any, cap: int = PREVIEW_CAP, agent_id: str | None = None) -> NormalizedMessage | None:
+    """Map an at-rest SessionMessage (from get_session_messages) to the wire model.
+
+    Unlike the live stream, at-rest user prompts must render (full transcript view).
+    """
+    if rec.type not in ("user", "assistant"):
+        return None
+    message = rec.message
+    if not isinstance(message, dict):
+        return None
+    blocks = _blocks_from_raw_content(message.get("content"), cap)
+    if not blocks:
+        return None
+    return NormalizedMessage(
+        uuid=rec.uuid or _new_uuid(),
+        role="assistant" if rec.type == "assistant" else "user",
+        agent_id=agent_id,
+        blocks=blocks,
+    )
+
+
+class TranscriptCache:
+    """Per-session normalized message lists with uuid-based diffing.
+
+    The SDK has no incremental read, so refresh is full re-read + diff; the bus
+    seq (owned by EventBus per session topic) is the client's replay watermark.
+    """
+
+    def __init__(self, max_messages: int = 2000):
+        self._max = max_messages
+        self._messages: dict[str, list[NormalizedMessage]] = {}
+        self._seen: dict[str, set[str]] = {}
+
+    def get(self, session_id: str) -> list[NormalizedMessage] | None:
+        return self._messages.get(session_id)
+
+    def message_count(self, session_id: str) -> int:
+        return len(self._messages.get(session_id, []))
+
+    def ingest(self, session_id: str, normalized: list[NormalizedMessage]) -> list[NormalizedMessage]:
+        """Merge a full re-read; returns only the messages not seen before."""
+        seen = self._seen.setdefault(session_id, set())
+        messages = self._messages.setdefault(session_id, [])
+        fresh = [m for m in normalized if m.uuid not in seen]
+        for m in fresh:
+            seen.add(m.uuid)
+            messages.append(m)
+        if len(messages) > self._max:
+            del messages[: len(messages) - self._max]
+        return fresh
+
+    def append_live(self, session_id: str, message: NormalizedMessage) -> bool:
+        """Add a message arriving from a live driver stream; False if duplicate."""
+        seen = self._seen.setdefault(session_id, set())
+        if message.uuid in seen:
+            return False
+        seen.add(message.uuid)
+        self._messages.setdefault(session_id, []).append(message)
+        return True
+
+    def drop(self, session_id: str) -> None:
+        self._messages.pop(session_id, None)
+        self._seen.pop(session_id, None)

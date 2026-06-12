@@ -17,6 +17,8 @@ def _iso(value: Any) -> str | None:
     if isinstance(value, datetime):
         return value.astimezone(timezone.utc).isoformat()
     if isinstance(value, (int, float)):
+        if value > 1e11:  # epoch milliseconds (SDK uses ms; seconds would be year 5138+)
+            value = value / 1000
         return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
     return str(value)
 
@@ -55,7 +57,63 @@ class Catalog:
         return [map_summary(i, flags.get(i.session_id, {})) for i in infos]
 
     async def project_keys(self, root: Path) -> list[str]:
+        """Transcript-dir keys for a root: canonical plus the macOS symlink alias
+        spelling (/private/var/x ↔ /var/x), so externally-started sessions are
+        found regardless of how the cwd was recorded."""
+
         def _keys() -> list[str]:
-            return [sdk.project_key_for_directory(str(root))]
+            spellings = {str(root)}
+            s = str(root)
+            for real, alias in (("/private/var/", "/var/"), ("/private/tmp/", "/tmp/"), ("/private/etc/", "/etc/")):
+                if s.startswith(real):
+                    spellings.add(alias + s[len(real):])
+                elif s.startswith(alias):
+                    spellings.add(real + s[len(alias):])
+            keys = []
+            for sp in spellings:
+                try:
+                    key = sdk.project_key_for_directory(sp)
+                    if key not in keys:
+                        keys.append(key)
+                except Exception:
+                    continue
+            return keys
 
         return await asyncio.to_thread(_keys)
+
+    async def session_info(self, session_id: str, root: Path) -> Any | None:
+        def _info() -> Any | None:
+            try:
+                return sdk.get_session_info(session_id, directory=str(root))
+            except Exception:
+                return None
+
+        return await asyncio.to_thread(_info)
+
+    async def session_messages(self, session_id: str, root: Path) -> list[Any]:
+        def _messages() -> list[Any]:
+            try:
+                return sdk.get_session_messages(session_id, directory=str(root))
+            except Exception:
+                log.debug("get_session_messages failed for %s", session_id, exc_info=True)
+                return []
+
+        return await asyncio.to_thread(_messages)
+
+    async def subagents(self, session_id: str, root: Path) -> list[str]:
+        def _agents() -> list[str]:
+            try:
+                return sdk.list_subagents(session_id, directory=str(root))
+            except Exception:
+                return []
+
+        return await asyncio.to_thread(_agents)
+
+    async def subagent_messages(self, session_id: str, agent_id: str, root: Path) -> list[Any]:
+        def _messages() -> list[Any]:
+            try:
+                return sdk.get_subagent_messages(session_id, agent_id, directory=str(root))
+            except Exception:
+                return []
+
+        return await asyncio.to_thread(_messages)

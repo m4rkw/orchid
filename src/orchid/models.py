@@ -30,6 +30,17 @@ class SessionSummary(BaseModel):
     created_by: Literal["orchid", "external"] = "external"
 
 
+class SessionDetail(SessionSummary):
+    project_id: str
+    handoff_command: str
+
+
+class AgentInfo(BaseModel):
+    agent_id: str
+    message_count: int = 0
+    status: Literal["running", "done"] = "done"
+
+
 class Block(BaseModel):
     type: Literal["text", "thinking", "tool_use", "tool_result"]
     text: str | None = None

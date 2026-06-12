@@ -11,9 +11,11 @@ from ..bus import EventBus
 from ..claude.catalog import Catalog
 from ..claude.onboarding import build_onboarding_driver
 from ..claude.runner import Runner, SdkRunner
+from ..claude.transcript import TranscriptCache
 from ..config import Settings
-from ..services import ApiError, ProjectService
+from ..services import ApiError, ProjectService, SessionService
 from ..store.registry import Registry
+from ..watch.watcher import WatcherManager
 from . import onboarding_api, projects, sessions, ws
 
 _FALLBACK_HTML = """<!doctype html><html><body style="font-family: ui-monospace, monospace;
@@ -44,16 +46,24 @@ def create_app(settings: Settings | None = None, runner: Runner | None = None) -
         bus = EventBus()
         catalog = Catalog()
         registry = Registry(settings.registry_path)
-        service = ProjectService(registry, catalog, bus, settings)
+        cache = TranscriptCache()
+        session_service = SessionService(registry, catalog, cache, bus, settings)
+        watcher = WatcherManager(catalog, session_service, settings)
+        service = ProjectService(registry, catalog, bus, settings, observers=[watcher])
         onboarding = build_onboarding_driver(runner or SdkRunner(), bus, service, settings)
         app.state.settings = settings
         app.state.bus = bus
         app.state.catalog = catalog
         app.state.registry = registry
+        app.state.cache = cache
+        app.state.sessions = session_service
+        app.state.watcher = watcher
         app.state.service = service
         app.state.onboarding = onboarding
         app.state.claude_cli_version = await _claude_cli_version()
+        await watcher.start(registry.list())
         yield
+        await watcher.aclose()
         await onboarding.aclose()
 
     app = FastAPI(title="Orchid", version=__version__, lifespan=lifespan)
