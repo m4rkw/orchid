@@ -224,6 +224,24 @@ async def test_permission_deny_and_timeout(harness, monkeypatch):
     assert "timed out" in result.message
 
 
+async def test_subagent_hooks_track_live_agents(harness):
+    h = harness([])
+    hooks = h.manager._subagent_hooks()
+    on_start = hooks["SubagentStart"][0].hooks[0]
+    on_stop = hooks["SubagentStop"][0].hooks[0]
+    sub = h.bus.subscribe({f"session:{SID}"})
+
+    await on_start({"session_id": SID, "agent_id": "ag-1", "agent_type": "explorer"}, None, None)
+    assert h.manager.live_agents(SID) == {"ag-1": "running"}
+    evt = sub.queue.get_nowait()
+    assert evt["type"] == "agent_started"
+    assert evt["payload"] == {"agent_id": "ag-1", "agent_type": "explorer"}
+
+    await on_stop({"session_id": SID, "agent_id": "ag-1"}, None, None)
+    assert h.manager.live_agents(SID) == {"ag-1": "done"}
+    assert sub.queue.get_nowait()["type"] == "agent_stopped"
+
+
 async def test_interrupt_denies_pending_permissions(harness):
     gate = asyncio.Event()
     h = harness([[[init_msg(), gate, result_msg()]]])

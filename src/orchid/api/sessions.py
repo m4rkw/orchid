@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -21,6 +21,18 @@ class NewSessionBody(BaseModel):
 class PromptBody(BaseModel):
     prompt: str
     force: bool = False
+
+
+class RenameBody(BaseModel):
+    title: str
+
+
+class FlagBody(BaseModel):
+    value: bool
+
+
+class ForkBody(BaseModel):
+    title: str | None = None
 
 
 @router.get("/projects/{project_id}/sessions")
@@ -72,3 +84,33 @@ async def prompt_session(request: Request, session_id: str, body: PromptBody):
 async def interrupt_session(request: Request, session_id: str):
     await _manager(request).interrupt(session_id)
     return {}
+
+
+@router.post("/sessions/{session_id}/rename")
+async def rename_session(request: Request, session_id: str, body: RenameBody):
+    await _sessions(request).rename(session_id, body.title)
+    return {}
+
+
+@router.post("/sessions/{session_id}/pin")
+async def pin_session(request: Request, session_id: str, body: FlagBody):
+    await _sessions(request).set_flag(session_id, pinned=body.value)
+    return {}
+
+
+@router.post("/sessions/{session_id}/archive")
+async def archive_session(request: Request, session_id: str, body: FlagBody):
+    await _sessions(request).set_flag(session_id, archived=body.value)
+    return {}
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+async def delete_session(request: Request, session_id: str, force: bool = False):
+    await _sessions(request).delete(session_id, force=force)
+    return Response(status_code=204)
+
+
+@router.post("/sessions/{session_id}/fork", status_code=201)
+async def fork_session(request: Request, session_id: str, body: ForkBody):
+    new_sid = await _sessions(request).fork(session_id, title=body.title)
+    return {"session_id": new_sid}

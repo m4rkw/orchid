@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
+from claude_agent_sdk import HookMatcher, PermissionResultAllow, PermissionResultDeny
 
 from ..bus import EventBus
 from ..config import Settings
@@ -47,6 +47,7 @@ class DriverManager:
         self._perms: dict[str, tuple[asyncio.Future, str | None]] = {}
         self._last_burst_end: dict[str, float] = {}
         self._resync_tasks: set[asyncio.Task] = set()
+        self._agents: dict[str, dict[str, str]] = {}  # sid -> {agent_id: status}
 
     # -- status -------------------------------------------------------------
 
@@ -57,6 +58,35 @@ class DriverManager:
     def queue_len(self, session_id: str) -> int:
         d = self._drivers.get(session_id)
         return d.queue_len if d else 0
+
+    def live_agents(self, session_id: str) -> dict[str, str]:
+        return dict(self._agents.get(session_id, {}))
+
+    # -- subagent hooks -------------------------------------------------------
+
+    def _subagent_hooks(self):
+        async def on_start(input_data: dict, _tool_use_id: str | None, _ctx: Any):
+            sid, aid = input_data.get("session_id"), input_data.get("agent_id")
+            if sid and aid:
+                self._agents.setdefault(sid, {})[aid] = "running"
+                self._bus.publish(
+                    f"session:{sid}",
+                    "agent_started",
+                    {"agent_id": aid, "agent_type": input_data.get("agent_type")},
+                )
+            return {}
+
+        async def on_stop(input_data: dict, _tool_use_id: str | None, _ctx: Any):
+            sid, aid = input_data.get("session_id"), input_data.get("agent_id")
+            if sid and aid:
+                self._agents.setdefault(sid, {})[aid] = "done"
+                self._bus.publish(f"session:{sid}", "agent_stopped", {"agent_id": aid})
+            return {}
+
+        return {
+            "SubagentStart": [HookMatcher(hooks=[on_start])],
+            "SubagentStop": [HookMatcher(hooks=[on_stop])],
+        }
 
     # -- driver construction --------------------------------------------------
 
@@ -79,7 +109,7 @@ class DriverManager:
                 setting_sources=["user", "project", "local"],
                 permission_mode=permission_mode or proj_settings.get("permission_mode") or "acceptEdits",
                 model=model or proj_settings.get("model"),
-                extra_options={"can_use_tool": can_use_tool},
+                extra_options={"can_use_tool": can_use_tool, "hooks": self._subagent_hooks()},
             )
 
         def status_cb(d: SessionDriver) -> None:

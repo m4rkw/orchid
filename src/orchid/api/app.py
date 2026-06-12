@@ -55,6 +55,7 @@ def create_app(settings: Settings | None = None, runner: Runner | None = None) -
         onboarding = build_onboarding_driver(active_runner, bus, service, settings)
         driver_manager = DriverManager(active_runner, bus, cache, session_service, watcher, settings)
         session_service.is_running = driver_manager.is_running
+        session_service.live_agents = driver_manager.live_agents
         service.is_running = driver_manager.is_running
         app.state.driver_manager = driver_manager
         app.state.settings = settings

@@ -15,6 +15,16 @@ class CreateProjectBody(BaseModel):
     name: str | None = None
 
 
+class ProjectSettingsPatch(BaseModel):
+    model: str | None = None
+    permission_mode: str | None = None
+
+
+class PatchProjectBody(BaseModel):
+    name: str | None = None
+    settings: ProjectSettingsPatch | None = None
+
+
 @router.get("/projects")
 async def list_projects(request: Request):
     return [p.model_dump() for p in await _service(request).list_projects()]
@@ -25,6 +35,16 @@ async def create_project(request: Request, body: CreateProjectBody):
     project, created = await _service(request).create(body.path, body.name)
     if not created:
         raise ApiError("ALREADY_REGISTERED", f"already registered as '{project.name}'", 409)
+    return project.model_dump()
+
+
+@router.patch("/projects/{project_id}")
+async def patch_project(request: Request, project_id: str, body: PatchProjectBody):
+    project = await _service(request).update(
+        project_id,
+        name=body.name,
+        settings=body.settings.model_dump(exclude_none=True) if body.settings else None,
+    )
     return project.model_dump()
 
 

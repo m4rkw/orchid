@@ -73,6 +73,22 @@ class ProjectService:
             raise ApiError("PROJECT_NOT_FOUND", f"no project {project_id}", 404)
         return entry
 
+    async def update(self, project_id: str, name: str | None = None,
+                     settings: dict[str, Any] | None = None) -> Project:
+        entry = self.get_entry(project_id)
+        root = Path(entry["root"])
+        file = project_store.read_project_file(root)
+        if file is None:
+            raise ApiError("PROJECT_MISSING", "project .orchid state is missing", 409)
+        if name is not None:
+            file["name"] = name
+        if settings:
+            file.setdefault("settings", {}).update(settings)
+        project_store.write_project_file(root, file)
+        project = await self._to_project(entry)
+        self._bus.publish("sidebar", "project_updated", {"project": project.model_dump()})
+        return project
+
     async def remove(self, project_id: str) -> None:
         if not self._registry.remove(project_id):
             raise ApiError("PROJECT_NOT_FOUND", f"no project {project_id}", 404)
@@ -139,6 +155,7 @@ class SessionService:
         self._settings = settings
         self._locations: dict[str, str] = {}  # session_id -> project_id
         self.is_running: Any = None  # wired to DriverManager.is_running at app startup
+        self.live_agents: Any = None  # wired to DriverManager.live_agents at app startup
 
     async def locate(self, session_id: str) -> tuple[dict, Any]:
         """Find which onboarded project a session belongs to -> (registry entry, SDKSessionInfo)."""
@@ -199,12 +216,58 @@ class SessionService:
     async def agents(self, session_id: str) -> list[AgentInfo]:
         entry, _info = await self.locate(session_id)
         root = Path(entry["root"])
-        agent_ids = await self._catalog.subagents(session_id, root)
+        live = self.live_agents(session_id) if self.live_agents else {}
+        agent_ids = list(dict.fromkeys([*await self._catalog.subagents(session_id, root), *live.keys()]))
         out = []
         for agent_id in agent_ids:
             msgs = await self._catalog.subagent_messages(session_id, agent_id, root)
-            out.append(AgentInfo(agent_id=agent_id, message_count=len(msgs)))
+            status = "running" if agent_id in live and live[agent_id] == "running" else "done"
+            out.append(AgentInfo(agent_id=agent_id, message_count=len(msgs), status=status))
         return out
+
+    async def rename(self, session_id: str, title: str) -> None:
+        entry, _info = await self.locate(session_id)
+        root = Path(entry["root"])
+        await self._catalog.rename(session_id, title, root)
+        await self._emit_upsert(session_id, entry["id"], root)
+
+    async def set_flag(self, session_id: str, **flags: Any) -> None:
+        entry, _info = await self.locate(session_id)
+        root = Path(entry["root"])
+        project_store.set_session_flags(root, session_id, **flags)
+        await self._emit_upsert(session_id, entry["id"], root)
+
+    async def delete(self, session_id: str, force: bool = False) -> None:
+        entry, info = await self.locate(session_id)
+        root = Path(entry["root"])
+        if self.is_running and self.is_running(session_id):
+            raise ApiError("SESSION_RUNNING", "session is being driven by Orchid", 409)
+        if not force and status_from_updated(
+            map_summary(info, {}).updated_at, self._settings.external_window_s
+        ) == "external":
+            raise ApiError("EXTERNAL_ACTIVITY", "session changed recently (open in a terminal?)", 409)
+        await self._catalog.delete(session_id, root)
+        self._cache.drop(session_id)
+        self._bus.publish(
+            "sidebar", "session_removed", {"project_id": entry["id"], "session_id": session_id}
+        )
+
+    async def fork(self, session_id: str, title: str | None = None) -> str:
+        entry, _info = await self.locate(session_id)
+        root = Path(entry["root"])
+        new_sid = await self._catalog.fork(session_id, root, title=title)
+        await self._emit_upsert(new_sid, entry["id"], root)
+        return new_sid
+
+    async def _emit_upsert(self, session_id: str, project_id: str, root: Path) -> None:
+        info = await self._catalog.session_info(session_id, root)
+        if info is not None:
+            summary = self._summary(session_id, info, root)
+            self._bus.publish(
+                "sidebar",
+                "session_upserted",
+                {"project_id": project_id, "session": summary.model_dump()},
+            )
 
     async def agent_messages(self, session_id: str, agent_id: str) -> dict[str, Any]:
         entry, _info = await self.locate(session_id)

@@ -1,7 +1,8 @@
+import json
+from datetime import datetime, timezone
+
 import requests
 from claude_agent_sdk import SDKSessionInfo, SessionMessage
-
-from datetime import datetime, timezone
 
 SID = "99999999-8888-7777-6666-555555555555"
 
@@ -50,10 +51,25 @@ def _stub_catalog(app, root, sid=SID):
             )
         ]
 
+    state = {"title": None, "deleted": False}
+
+    async def rename(s, title, r):
+        state["title"] = title
+
+    async def delete(s, r):
+        state["deleted"] = True
+
+    async def fork(s, r, title=None):
+        return "forked-sid"
+
     catalog.session_info = session_info
     catalog.session_messages = session_messages
     catalog.subagents = subagents
     catalog.subagent_messages = subagent_messages
+    catalog.rename = rename
+    catalog.delete = delete
+    catalog.fork = fork
+    app.state._stub_state = state
 
 
 def _make_project(url, homes):
@@ -102,3 +118,37 @@ def test_session_not_found(server_app):
     r = requests.get(f"{server_app.url}/api/sessions/unknown-sid", timeout=5)
     assert r.status_code == 404
     assert r.json()["error"]["code"] == "SESSION_NOT_FOUND"
+
+
+def test_session_management_endpoints(server_app, homes):
+    url, app = server_app.url, server_app.app
+    root, _pid = _make_project(url, homes)
+    _stub_catalog(app, root)
+
+    assert requests.post(f"{url}/api/sessions/{SID}/rename", json={"title": "Renamed"}, timeout=5).status_code == 200
+    assert app.state._stub_state["title"] == "Renamed"
+
+    assert requests.post(f"{url}/api/sessions/{SID}/pin", json={"value": True}, timeout=5).status_code == 200
+    assert requests.post(f"{url}/api/sessions/{SID}/archive", json={"value": True}, timeout=5).status_code == 200
+
+    r = requests.post(f"{url}/api/sessions/{SID}/fork", json={}, timeout=5)
+    assert r.status_code == 201 and r.json()["session_id"] == "forked-sid"
+
+    # SID mtime is 2026 (old) -> not external -> delete allowed
+    assert requests.delete(f"{url}/api/sessions/{SID}", timeout=5).status_code == 204
+    assert app.state._stub_state["deleted"] is True
+
+
+def test_project_patch_settings(server_app, homes):
+    url = server_app.url
+    root, pid = _make_project(url, homes)
+    r = requests.patch(
+        f"{url}/api/projects/{pid}",
+        json={"name": "Renamed Project", "settings": {"permission_mode": "plan", "model": "claude-opus-4-8"}},
+        timeout=5,
+    )
+    assert r.status_code == 200
+    assert r.json()["name"] == "Renamed Project"
+    on_disk = json.loads((root / ".orchid" / "project.json").read_text())
+    assert on_disk["settings"]["permission_mode"] == "plan"
+    assert on_disk["settings"]["model"] == "claude-opus-4-8"

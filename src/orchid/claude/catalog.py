@@ -131,3 +131,15 @@ class Catalog:
                 return []
 
         return await asyncio.to_thread(_messages)
+
+    async def rename(self, session_id: str, title: str, root: Path) -> None:
+        await asyncio.to_thread(sdk.rename_session, session_id, title, directory=str(root))
+
+    async def delete(self, session_id: str, root: Path) -> None:
+        await asyncio.to_thread(sdk.delete_session, session_id, directory=str(root))
+
+    async def fork(self, session_id: str, root: Path, title: str | None = None) -> str:
+        def _fork() -> str:
+            return sdk.fork_session(session_id, directory=str(root), title=title).session_id
+
+        return await asyncio.to_thread(_fork)
