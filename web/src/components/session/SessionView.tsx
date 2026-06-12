@@ -137,6 +137,14 @@ export function SessionView({ pid, sid }: { pid: string; sid: string }) {
             queued: {queueLen}
           </span>
         )}
+        {detail.data?.created_by === "external" && (
+          <span
+            className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-px text-[10px] font-medium text-amber-300/90"
+            title="This session was created in a terminal. Viewing is safe; sending a prompt from the web could conflict with the terminal, so you'll be asked to take over first."
+          >
+            terminal
+          </span>
+        )}
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {interruptError && <span className="text-[10px] text-red-400">{interruptError}</span>}
           {status === "running" && (
@@ -271,7 +279,10 @@ function Composer({
     <div className="shrink-0 border-t border-zinc-800 p-4 pt-3">
       {externalPrompt !== null && (
         <div className="mx-auto mb-2 flex max-w-3xl items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-          <span className="min-w-0">This session looks active in a terminal — Send anyway?</span>
+          <span className="min-w-0">
+            This session is owned by a terminal — driving it from the web at the same time can corrupt
+            it. Take over only if no terminal has it open.
+          </span>
           <button
             type="button"
             disabled={sending}

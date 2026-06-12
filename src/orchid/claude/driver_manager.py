@@ -192,17 +192,37 @@ class DriverManager:
             return {"state": "running", "queue_len": driver.queue_len}
 
         entry, info = await self._sessions.locate(session_id)
-        if not force and self._looks_external(session_id, info):
+        root = Path(entry["root"])
+        if not force and self._terminal_owned(session_id, info, root, driver):
             raise ApiError(
                 "EXTERNAL_ACTIVITY",
-                "session transcript changed recently outside Orchid (open in a terminal?)",
+                "this session is owned by a terminal (or changed recently outside Orchid); "
+                "driving it from the web can corrupt it — take over only if no terminal is using it",
                 409,
             )
         if driver is None:
-            driver = self._build_driver(Path(entry["root"]), entry["id"], session_id=session_id)
+            driver = self._build_driver(root, entry["id"], session_id=session_id)
             self._register(session_id, driver, entry["id"])
         await driver.prompt(text)
         return {"state": "starting", "queue_len": driver.queue_len}
+
+    def _terminal_owned(self, session_id: str, info: Any, root: Path, driver) -> bool:
+        """Would driving this session from the web risk a two-writer conflict?
+
+        Two writers on one Claude Code transcript corrupt it, and there is no
+        lock to detect a live-but-idle terminal session. So we are conservative:
+        a session Orchid did not create is assumed terminal-owned until the user
+        explicitly takes it over (force) — mtime-independent, because an idle
+        terminal session (waiting at its prompt) has a stale mtime yet is very
+        much alive. Once Orchid has a driver for it, only a *fresh* outside write
+        (mtime since our last burst) re-raises the guard.
+        """
+        if driver is not None:
+            return self._looks_external(session_id, info)
+        flags = project_store.get_session_flags(root).get(session_id, {})
+        if flags.get("created_by") != "orchid":
+            return True
+        return self._looks_external(session_id, info)
 
     def _looks_external(self, session_id: str, info: Any) -> bool:
         age = age_seconds(info.last_modified)

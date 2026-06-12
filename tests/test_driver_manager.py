@@ -129,6 +129,22 @@ async def test_prompt_external_guard_and_force(harness):
     await h.manager.aclose()
 
 
+async def test_terminal_owned_session_requires_takeover(harness):
+    # The real-world bug: an idle terminal session (stale mtime) is still alive.
+    # A session Orchid did not create must require an explicit takeover regardless
+    # of mtime, so the web can't accidentally spawn a second writer on it.
+    h = harness([[[init_msg(), result_msg()]]])
+    h.info_age_minutes = 999.0  # not recently written — old, looks idle
+    assert project_store.get_session_flags(h.root).get(SID, {}).get("created_by") != "orchid"
+    with pytest.raises(ApiError) as e:
+        await h.manager.prompt(SID, "hi")  # blocked despite stale mtime
+    assert e.value.code == "EXTERNAL_ACTIVITY"
+    out = await h.manager.prompt(SID, "hi", force=True)  # explicit takeover works
+    assert out["state"] == "starting"
+    await wait_for(lambda: not h.manager.is_running(SID))
+    await h.manager.aclose()
+
+
 async def test_burst_start_marks_session_ours(harness):
     # Regression: a follow-up prompt can arrive after turn_completed but before the
     # burst finishes closing. Stamping at burst start must already suppress the
@@ -142,6 +158,7 @@ async def test_burst_start_marks_session_ours(harness):
 
 async def test_own_recent_burst_not_external(harness):
     h = harness([[[init_msg(), result_msg()]], [[result_msg()]]])
+    project_store.set_session_flags(h.root, SID, created_by="orchid")  # Orchid owns it
     h.info_age_minutes = 120.0
     await h.manager.prompt(SID, "one")
     await wait_for(lambda: not h.manager.is_running(SID))
@@ -173,6 +190,7 @@ async def test_queue_while_running_and_interrupt(harness):
 
 async def test_status_events_on_sidebar(harness):
     h = harness([[[init_msg(), result_msg()]]])
+    project_store.set_session_flags(h.root, SID, created_by="orchid")  # Orchid owns it
     sub = h.bus.subscribe()
     await h.manager.prompt(SID, "go", force=False)
     await wait_for(lambda: not h.manager.is_running(SID))
