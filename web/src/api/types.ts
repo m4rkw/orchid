@@ -6,6 +6,20 @@ export type Project = {
   missing: boolean;
 };
 
+/** Per-project defaults. `null` model means "inherit". Not returned by GET /api/projects. */
+export type ProjectSettings = {
+  model?: string | null;
+  permission_mode?: PermissionMode;
+};
+
+export type PermissionMode = "acceptEdits" | "default" | "plan" | "bypassPermissions";
+
+/** Body of PATCH /api/projects/{pid}. */
+export type ProjectUpdate = {
+  name?: string;
+  settings?: ProjectSettings;
+};
+
 export type SessionStatus = "idle" | "running" | "external";
 
 export type SessionSummary = {
@@ -31,6 +45,8 @@ export type AgentInfo = {
   agent_id: string;
   message_count: number;
   status: AgentStatus;
+  /** Set from the `agent_started` event when known; absent from the REST list. */
+  agent_type?: string;
 };
 
 /** Payload of a `permission_request` WS event. */
@@ -53,6 +69,11 @@ export type MessagesResponse = {
 export type PromptAccepted = {
   state: string;
   queue_len: number;
+};
+
+/** 201 response of POST /api/sessions/{sid}/fork. */
+export type ForkResponse = {
+  session_id: string;
 };
 
 export type Block = {
@@ -79,6 +100,23 @@ export type WsEvent = {
   seq: number;
   type: string;
   payload: Record<string, unknown>;
+};
+
+/** Payload of a `session_removed` WS event (topic `sidebar`). */
+export type SessionRemovedEvent = {
+  project_id: string;
+  session_id: string;
+};
+
+/** Payload of a `project_updated` WS event (topic `sidebar`). */
+export type ProjectUpdatedEvent = {
+  project: Project;
+};
+
+/** Payload of `agent_started` / `agent_stopped` WS events (topic `session:<sid>`). */
+export type AgentLifecycleEvent = {
+  agent_id: string;
+  agent_type?: string;
 };
 
 /** Response shape of GET /api/health. */

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { api, ApiError } from "../../api/client";
+import type { SessionDetail } from "../../api/types";
 import { isLocalUuid, useAppStore } from "../../state/stores";
 import { socket } from "../../ws/socket";
 import { CopyButton } from "../common/CopyButton";
@@ -22,6 +23,7 @@ export function SessionView({ pid, sid }: { pid: string; sid: string }) {
   const queueLen = useAppStore((s) => s.queueLens[sid] ?? 0);
   const agents = useAppStore((s) => s.agents[sid]);
   const permissions = useAppStore((s) => s.permissions[sid]);
+  const selectedDrillAgentId = useAppStore((s) => (s.selected?.sid === sid ? s.selected.drillAgentId : undefined));
 
   // Track the live topic for the lifetime of the selection.
   useEffect(() => {
@@ -76,6 +78,18 @@ export function SessionView({ pid, sid }: { pid: string; sid: string }) {
   const [drillAgentId, setDrillAgentId] = useState<string | null>(null);
   const drillAgent = drillAgentId === null ? null : (agents ?? []).find((a) => a.agent_id === drillAgentId) ?? null;
   useEffect(() => setDrillAgentId(null), [sid]);
+  // Opening an agent from the LEFT TREE flows through the selection; mirror it here.
+  useEffect(() => {
+    if (selectedDrillAgentId) setDrillAgentId(selectedDrillAgentId);
+  }, [selectedDrillAgentId]);
+  const closeDrill = () => {
+    setDrillAgentId(null);
+    const { selected, select } = useAppStore.getState();
+    // Clear the selection's drill marker so re-clicking the same agent re-opens.
+    if (selected?.sid === sid && selected.drillAgentId) {
+      select({ ...selected, drillAgentId: undefined });
+    }
+  };
 
   const [interruptError, setInterruptError] = useState<string | null>(null);
   const interrupt = async () => {
@@ -94,13 +108,25 @@ export function SessionView({ pid, sid }: { pid: string; sid: string }) {
     useAppStore.getState().markMessageFull(sid, full);
   };
 
+  const [headerRenaming, setHeaderRenaming] = useState(false);
+  useEffect(() => setHeaderRenaming(false), [sid]);
+
   return (
     <div className="relative flex h-full flex-col">
       <div className="flex h-11 shrink-0 items-center gap-2.5 border-b border-zinc-800 px-4">
         <StatusDot status={status} />
-        <h1 className="min-w-0 truncate text-sm font-medium text-zinc-200" title={sid}>
-          {title}
-        </h1>
+        {headerRenaming ? (
+          <HeaderRenameField sid={sid} initial={detail.data?.title ?? ""} onDone={() => setHeaderRenaming(false)} />
+        ) : (
+          <h1
+            className="min-w-0 cursor-text truncate text-sm font-medium text-zinc-200 hover:text-zinc-100"
+            title={sid}
+            onDoubleClick={() => setHeaderRenaming(true)}
+          >
+            {detail.data?.pinned && <span className="mr-1 text-[11px] text-violet-400/70">★</span>}
+            {title}
+          </h1>
+        )}
         <span className="hidden min-w-0 truncate text-[11px] text-zinc-600 sm:inline">
           {project ? `${project.name} · ` : ""}
           {messageCount} {messageCount === 1 ? "message" : "messages"}
@@ -135,6 +161,13 @@ export function SessionView({ pid, sid }: { pid: string; sid: string }) {
             >
               agents {agents!.length}
             </button>
+          )}
+          {detail.data && (
+            <SessionHeaderMenu
+              pid={detail.data.project_id ?? pid}
+              session={detail.data}
+              onRename={() => setHeaderRenaming(true)}
+            />
           )}
         </div>
       </div>
@@ -175,7 +208,7 @@ export function SessionView({ pid, sid }: { pid: string; sid: string }) {
         )}
       </div>
 
-      {drillAgent && <AgentDrillIn sid={sid} agent={drillAgent} onClose={() => setDrillAgentId(null)} />}
+      {drillAgent && <AgentDrillIn sid={sid} agent={drillAgent} onClose={closeDrill} />}
     </div>
   );
 }
@@ -322,5 +355,215 @@ function Composer({
         {queueLen > 0 && <span className="ml-auto text-violet-400/80">queued: {queueLen}</span>}
       </div>
     </div>
+  );
+}
+
+/** Inline title editor in the SessionView header. */
+function HeaderRenameField({ sid, initial, onDone }: { sid: string; initial: string; onDone: () => void }) {
+  const [value, setValue] = useState(initial);
+  const rename = useMutation({
+    mutationFn: (title: string) => api.renameSession(sid, title),
+    onSuccess: onDone, // session_upserted refreshes the cache
+  });
+
+  const submit = () => {
+    const title = value.trim();
+    if (!title || rename.isPending) return;
+    if (title === initial.trim()) {
+      onDone();
+      return;
+    }
+    rename.mutate(title);
+  };
+
+  return (
+    <input
+      autoFocus
+      value={value}
+      disabled={rename.isPending}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={onDone}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          submit();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          onDone();
+        }
+      }}
+      className="min-w-0 flex-1 rounded border border-violet-500/40 bg-ink-900 px-2 py-0.5 text-sm font-medium text-zinc-100 outline-none focus:border-violet-500/70 disabled:opacity-50"
+    />
+  );
+}
+
+/** ⋯ menu in the SessionView header: pin / archive / fork / delete (rename via header title). */
+function SessionHeaderMenu({
+  pid,
+  session,
+  onRename,
+}: {
+  pid: string;
+  session: SessionDetail;
+  onRename: () => void;
+}) {
+  const select = useAppStore((s) => s.select);
+  const [open, setOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const close = () => {
+    setOpen(false);
+    setConfirmDelete(false);
+  };
+
+  const pin = useMutation({ mutationFn: (value: boolean) => api.pinSession(session.id, value) });
+  const archive = useMutation({ mutationFn: (value: boolean) => api.archiveSession(session.id, value) });
+  const fork = useMutation({
+    mutationFn: () => api.forkSession(session.id),
+    onSuccess: ({ session_id }) => {
+      close();
+      select({ pid, sid: session_id });
+    },
+  });
+  const del = useMutation({
+    mutationFn: (force?: boolean) => api.deleteSession(session.id, force),
+    onSuccess: () => {
+      useAppStore.getState().removeSession(pid, session.id);
+    },
+  });
+
+  const deleteErr = del.error instanceof ApiError ? del.error : null;
+  const isRunning = deleteErr?.status === 409 && deleteErr.code === "SESSION_RUNNING";
+  const isExternal = deleteErr?.status === 409 && deleteErr.code === "EXTERNAL_ACTIVITY";
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        aria-label="Session menu"
+        onClick={() => (open ? close() : setOpen(true))}
+        className={clsx(
+          "rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-400 transition-colors hover:border-zinc-500 hover:text-zinc-200",
+          open && "border-zinc-500 text-zinc-200",
+        )}
+      >
+        ⋯
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={close} />
+          <div className="absolute top-8 right-0 z-20 w-44 rounded-md border border-zinc-700 bg-zinc-900 p-1 shadow-xl shadow-black/50">
+            {confirmDelete ? (
+              <div className="px-2 py-1.5 text-xs">
+                <div className="mb-2 text-zinc-300">Delete this session?</div>
+                {isRunning && <div className="mb-2 text-[11px] text-red-400">Can’t delete a running session</div>}
+                {isExternal && (
+                  <div className="mb-2 text-[11px] text-amber-400">This session looks active in a terminal.</div>
+                )}
+                {deleteErr && !isRunning && !isExternal && (
+                  <div className="mb-2 text-[11px] text-red-400">{deleteErr.message}</div>
+                )}
+                <div className="flex justify-end gap-1.5">
+                  <button
+                    type="button"
+                    className="rounded px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                    onClick={() => {
+                      setConfirmDelete(false);
+                      del.reset();
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  {isExternal ? (
+                    <button
+                      type="button"
+                      disabled={del.isPending}
+                      className="rounded bg-amber-500/80 px-2 py-1 font-medium text-white hover:bg-amber-500 disabled:opacity-50"
+                      onClick={() => del.mutate(true)}
+                    >
+                      {del.isPending ? "Deleting…" : "Delete anyway"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={del.isPending || isRunning}
+                      className="rounded bg-red-600/80 px-2 py-1 font-medium text-white hover:bg-red-500 disabled:opacity-50"
+                      onClick={() => del.mutate(undefined)}
+                    >
+                      {del.isPending ? "Deleting…" : "Delete"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <>
+                <HeaderMenuItem
+                  label="Rename"
+                  onClick={() => {
+                    close();
+                    onRename();
+                  }}
+                />
+                <HeaderMenuItem
+                  label={session.pinned ? "Unpin" : "Pin"}
+                  disabled={pin.isPending}
+                  onClick={() => {
+                    pin.mutate(!session.pinned);
+                    close();
+                  }}
+                />
+                <HeaderMenuItem
+                  label={session.archived ? "Unarchive" : "Archive"}
+                  disabled={archive.isPending}
+                  onClick={() => {
+                    archive.mutate(!session.archived);
+                    close();
+                  }}
+                />
+                <HeaderMenuItem
+                  label={fork.isPending ? "Forking…" : "Fork"}
+                  disabled={fork.isPending}
+                  onClick={() => fork.mutate()}
+                />
+                {fork.isError && (
+                  <div className="px-2 py-1 text-[11px] text-red-400">
+                    {fork.error instanceof Error ? fork.error.message : "Fork failed"}
+                  </div>
+                )}
+                <div className="my-1 h-px bg-zinc-800" />
+                <button
+                  type="button"
+                  className="w-full rounded px-2 py-1.5 text-left text-xs text-red-400 hover:bg-zinc-800 hover:text-red-300"
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  Delete
+                </button>
+              </>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function HeaderMenuItem({
+  label,
+  onClick,
+  disabled,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      className="w-full rounded px-2 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50"
+      onClick={onClick}
+    >
+      {label}
+    </button>
   );
 }

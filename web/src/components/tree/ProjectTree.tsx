@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { clsx } from "clsx";
-import { api } from "../../api/client";
-import type { Project, SessionSummary } from "../../api/types";
+import { api, ApiError } from "../../api/client";
+import type { AgentInfo, Project, SessionSummary } from "../../api/types";
 import { queryClient } from "../../state/queryClient";
 import { useAppStore } from "../../state/stores";
+import { AgentDot } from "../session/AgentPanel";
 import { RelativeTime } from "../common/RelativeTime";
 import { StatusDot } from "../common/StatusDot";
 
@@ -201,13 +202,36 @@ function ProjectRow({
                   </div>
                 </div>
               ) : (
-                <button
-                  type="button"
-                  className="w-full rounded px-2 py-1.5 text-left text-xs text-red-400 hover:bg-zinc-800 hover:text-red-300"
-                  onClick={() => setConfirming(true)}
-                >
-                  Remove
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="w-full rounded px-2 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                    onClick={() => {
+                      closeMenu();
+                      useAppStore.getState().select({ pid: project.id, settings: true });
+                    }}
+                  >
+                    Settings
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full rounded px-2 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                    onClick={() => {
+                      closeMenu();
+                      useAppStore.getState().select({ pid: project.id, compose: true });
+                    }}
+                  >
+                    New session
+                  </button>
+                  <div className="my-1 h-px bg-zinc-800" />
+                  <button
+                    type="button"
+                    className="w-full rounded px-2 py-1.5 text-left text-xs text-red-400 hover:bg-zinc-800 hover:text-red-300"
+                    onClick={() => setConfirming(true)}
+                  >
+                    Remove
+                  </button>
+                </>
               )}
             </div>
           </>
@@ -224,12 +248,12 @@ function SessionList({ pid }: { pid: string }) {
     queryKey: ["sessions", pid],
     queryFn: () => api.sessions(pid),
   });
-  const selected = useAppStore((s) => s.selected);
-  const select = useAppStore((s) => s.select);
-  const statuses = useAppStore((s) => s.sessionStatuses);
+  const [showArchived, setShowArchived] = useState(false);
 
-  const visible = (data ?? [])
-    .filter((s) => !s.archived)
+  const sessions = data ?? [];
+  const archivedCount = sessions.filter((s) => s.archived).length;
+  const visible = sessions
+    .filter((s) => showArchived || !s.archived)
     .sort((a, b) => {
       if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
       return timestamp(b) - timestamp(a);
@@ -239,33 +263,382 @@ function SessionList({ pid }: { pid: string }) {
     <div className="mt-px mr-1 mb-1 ml-[15px] space-y-px border-l border-zinc-800/80 pl-1.5">
       {isPending && <div className="px-2 py-1.5 text-[11px] text-zinc-600">Loading sessions…</div>}
       {isError && <div className="px-2 py-1.5 text-[11px] text-red-400/80">Couldn’t load sessions</div>}
-      {data && visible.length === 0 && <div className="px-2 py-1.5 text-[11px] text-zinc-600">No sessions</div>}
-      {visible.map((s) => {
-        const isSelected = selected?.pid === pid && selected.sid === s.id;
-        return (
+      {data && visible.length === 0 && (
+        <div className="px-2 py-1.5 text-[11px] text-zinc-600">No sessions</div>
+      )}
+      {visible.map((s) => (
+        <SessionRow key={s.id} pid={pid} session={s} />
+      ))}
+      {archivedCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowArchived((v) => !v)}
+          className="w-full rounded px-2 py-1 text-left text-[10px] text-zinc-600 hover:bg-zinc-900 hover:text-zinc-400 focus-visible:outline-none"
+        >
+          {showArchived ? "hide archived" : `show archived (${archivedCount})`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SessionRow({ pid, session }: { pid: string; session: SessionSummary }) {
+  const selected = useAppStore((s) => s.selected);
+  const select = useAppStore((s) => s.select);
+  const statuses = useAppStore((s) => s.sessionStatuses);
+  const agents = useAppStore((s) => s.agents[session.id]);
+
+  const [agentsExpanded, setAgentsExpanded] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+
+  const isSelected = selected?.pid === pid && selected.sid === session.id;
+  const liveStatus = statuses[session.id] ?? session.status;
+
+  // Fetch the agent list when expanded (the selected session already streams it
+  // live via its topic, so only fetch for non-selected rows). Result is mirrored
+  // into the store via the effect below so the dots share one source of truth.
+  const agentsQuery = useQuery({
+    queryKey: ["session-agents", session.id],
+    queryFn: () => api.sessionAgents(session.id),
+    enabled: agentsExpanded && !isSelected,
+    staleTime: 15_000,
+  });
+  useEffect(() => {
+    if (agentsQuery.data && !isSelected) useAppStore.getState().setAgents(session.id, agentsQuery.data);
+  }, [agentsQuery.data, agentsQuery.dataUpdatedAt, isSelected, session.id]);
+
+  const agentList = agents ?? [];
+
+  return (
+    <div>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => select({ pid, sid: session.id })}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            select({ pid, sid: session.id });
+          }
+        }}
+        className={clsx(
+          "group/session relative flex cursor-pointer items-center gap-1.5 rounded-md py-1.5 pr-2 pl-1 select-none focus-visible:ring-2 focus-visible:ring-violet-500/40 focus-visible:outline-none",
+          isSelected ? "bg-violet-500/10 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-300",
+          session.archived && "opacity-60",
+        )}
+        title={session.title || session.id}
+      >
+        <button
+          type="button"
+          aria-label={agentsExpanded ? "Collapse agents" : "Expand agents"}
+          onClick={(e) => {
+            e.stopPropagation();
+            setAgentsExpanded((v) => !v);
+          }}
+          className={clsx(
+            "w-3 shrink-0 rounded text-center text-[9px] transition-transform duration-150 hover:text-zinc-300",
+            agentList.length > 0 ? "text-zinc-500" : "text-zinc-700",
+            agentsExpanded && "rotate-90",
+          )}
+        >
+          ▶
+        </button>
+        <StatusDot status={liveStatus} />
+        {session.pinned && (
+          <span title="Pinned" className="shrink-0 text-[9px] text-violet-400/70">
+            ★
+          </span>
+        )}
+        {renaming ? (
+          <RenameField
+            sid={session.id}
+            initial={session.title ?? ""}
+            onDone={() => setRenaming(false)}
+          />
+        ) : (
+          <span className="truncate text-[13px]">{session.title || `${session.id.slice(0, 8)}…`}</span>
+        )}
+        {session.archived && (
+          <span title="Archived" className="shrink-0 text-[9px] text-zinc-600">
+            ⊘
+          </span>
+        )}
+        {!renaming && (
+          <span className="ml-auto shrink-0 text-[10px] text-zinc-600 group-hover/session:hidden">
+            <RelativeTime iso={session.updated_at} />
+          </span>
+        )}
+        {!renaming && (
           <button
-            key={s.id}
             type="button"
-            onClick={() => select({ pid, sid: s.id })}
+            aria-label={`Session menu for ${session.title || session.id}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen((v) => !v);
+            }}
             className={clsx(
-              "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left focus-visible:ring-2 focus-visible:ring-violet-500/40 focus-visible:outline-none",
-              isSelected ? "bg-violet-500/10 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-300",
+              "ml-auto hidden shrink-0 rounded p-0.5 leading-none text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 group-hover/session:block focus-visible:block",
+              menuOpen && "!block",
             )}
           >
-            <StatusDot status={statuses[s.id] ?? s.status} />
-            {s.pinned && (
-              <span title="Pinned" className="shrink-0 text-[9px] text-violet-400/70">
-                ★
-              </span>
-            )}
-            <span className="truncate text-[13px]">{s.title || `${s.id.slice(0, 8)}…`}</span>
-            <span className="ml-auto shrink-0 text-[10px] text-zinc-600">
-              <RelativeTime iso={s.updated_at} />
-            </span>
+            ⋯
           </button>
-        );
-      })}
+        )}
+
+        {menuOpen && (
+          <SessionMenu
+            pid={pid}
+            session={session}
+            onClose={() => setMenuOpen(false)}
+            onRename={() => {
+              setMenuOpen(false);
+              setRenaming(true);
+            }}
+          />
+        )}
+      </div>
+
+      {agentsExpanded && (
+        <div className="mt-px mb-0.5 ml-[18px] space-y-px border-l border-zinc-800/60 pl-1.5">
+          {agentList.map((a) => (
+            <AgentRow key={a.agent_id} pid={pid} sid={session.id} agent={a} />
+          ))}
+          {agentList.length === 0 &&
+            (agentsQuery.isPending && !isSelected ? (
+              <div className="px-1.5 py-1 text-[10px] text-zinc-600">Loading agents…</div>
+            ) : (
+              <div className="px-1.5 py-1 text-[10px] text-zinc-600">No agents</div>
+            ))}
+        </div>
+      )}
     </div>
+  );
+}
+
+function AgentRow({ pid, sid, agent }: { pid: string; sid: string; agent: AgentInfo }) {
+  const select = useAppStore((s) => s.select);
+  const selected = useAppStore((s) => s.selected);
+  const isActive = selected?.sid === sid && selected.drillAgentId === agent.agent_id;
+
+  return (
+    <button
+      type="button"
+      onClick={() => select({ pid, sid, drillAgentId: agent.agent_id })}
+      title={agent.agent_id}
+      className={clsx(
+        "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left focus-visible:ring-2 focus-visible:ring-violet-500/40 focus-visible:outline-none",
+        isActive ? "bg-violet-500/10 text-zinc-200" : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300",
+      )}
+    >
+      <AgentDot status={agent.status} />
+      <span className="truncate font-mono text-[11px]">{agent.agent_id.slice(0, 8)}</span>
+      {agent.agent_type && (
+        <span className="shrink-0 truncate text-[10px] text-zinc-600">{agent.agent_type}</span>
+      )}
+      <span className="ml-auto shrink-0 rounded-full bg-zinc-800 px-1.5 py-px text-[10px] tabular-nums text-zinc-400">
+        {agent.message_count}
+      </span>
+    </button>
+  );
+}
+
+function RenameField({ sid, initial, onDone }: { sid: string; initial: string; onDone: () => void }) {
+  const [value, setValue] = useState(initial);
+  const rename = useMutation({
+    mutationFn: (title: string) => api.renameSession(sid, title),
+    // session_upserted updates the cache; nothing more to do on success.
+    onSuccess: onDone,
+  });
+
+  const submit = () => {
+    const title = value.trim();
+    if (!title || rename.isPending) return;
+    if (title === initial.trim()) {
+      onDone();
+      return;
+    }
+    rename.mutate(title);
+  };
+
+  return (
+    <input
+      autoFocus
+      value={value}
+      disabled={rename.isPending}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={onDone}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") {
+          e.preventDefault();
+          submit();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          onDone();
+        }
+      }}
+      className="min-w-0 flex-1 rounded border border-violet-500/40 bg-ink-900 px-1 py-0.5 text-[13px] text-zinc-100 outline-none focus:border-violet-500/70 disabled:opacity-50"
+    />
+  );
+}
+
+function SessionMenu({
+  pid,
+  session,
+  onClose,
+  onRename,
+}: {
+  pid: string;
+  session: SessionSummary;
+  onClose: () => void;
+  onRename: () => void;
+}) {
+  const select = useAppStore((s) => s.select);
+  /** null = not confirming; false = first ask; true = retry with ?force=true. */
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const pin = useMutation({
+    mutationFn: (value: boolean) => api.pinSession(session.id, value),
+  });
+  const archive = useMutation({
+    mutationFn: (value: boolean) => api.archiveSession(session.id, value),
+  });
+  const fork = useMutation({
+    mutationFn: () => api.forkSession(session.id),
+    onSuccess: ({ session_id }) => {
+      onClose();
+      // the new session arrives via session_upserted; select it now.
+      select({ pid, sid: session_id });
+    },
+  });
+  const del = useMutation({
+    mutationFn: (force?: boolean) => api.deleteSession(session.id, force),
+    onSuccess: () => {
+      // session_removed normally beats us; remove locally in case it doesn't.
+      useAppStore.getState().removeSession(pid, session.id);
+      onClose();
+    },
+  });
+
+  const deleteErr = del.error instanceof ApiError ? del.error : null;
+  const isRunning = deleteErr?.status === 409 && deleteErr.code === "SESSION_RUNNING";
+  const isExternal = deleteErr?.status === 409 && deleteErr.code === "EXTERNAL_ACTIVITY";
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-10"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
+      />
+      <div
+        className="absolute top-7 right-1 z-20 w-44 rounded-md border border-zinc-700 bg-zinc-900 p-1 shadow-xl shadow-black/50"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {confirmDelete ? (
+          <div className="px-2 py-1.5 text-xs">
+            <div className="mb-2 text-zinc-300">Delete this session?</div>
+            {isRunning && <div className="mb-2 text-[11px] text-red-400">Can’t delete a running session</div>}
+            {isExternal && (
+              <div className="mb-2 text-[11px] text-amber-400">This session looks active in a terminal.</div>
+            )}
+            {deleteErr && !isRunning && !isExternal && (
+              <div className="mb-2 text-[11px] text-red-400">{deleteErr.message}</div>
+            )}
+            <div className="flex justify-end gap-1.5">
+              <button
+                type="button"
+                className="rounded px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                onClick={() => {
+                  setConfirmDelete(false);
+                  del.reset();
+                }}
+              >
+                Cancel
+              </button>
+              {isExternal ? (
+                <button
+                  type="button"
+                  disabled={del.isPending}
+                  className="rounded bg-amber-500/80 px-2 py-1 font-medium text-white hover:bg-amber-500 disabled:opacity-50"
+                  onClick={() => del.mutate(true)}
+                >
+                  {del.isPending ? "Deleting…" : "Delete anyway"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={del.isPending || isRunning}
+                  className="rounded bg-red-600/80 px-2 py-1 font-medium text-white hover:bg-red-500 disabled:opacity-50"
+                  onClick={() => del.mutate(undefined)}
+                >
+                  {del.isPending ? "Deleting…" : "Delete"}
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
+            <MenuItem label="Rename" onClick={onRename} />
+            <MenuItem
+              label={session.pinned ? "Unpin" : "Pin"}
+              disabled={pin.isPending}
+              onClick={() => {
+                pin.mutate(!session.pinned);
+                onClose();
+              }}
+            />
+            <MenuItem
+              label={session.archived ? "Unarchive" : "Archive"}
+              disabled={archive.isPending}
+              onClick={() => {
+                archive.mutate(!session.archived);
+                onClose();
+              }}
+            />
+            <MenuItem label={fork.isPending ? "Forking…" : "Fork"} disabled={fork.isPending} onClick={() => fork.mutate()} />
+            {fork.isError && (
+              <div className="px-2 py-1 text-[11px] text-red-400">
+                {fork.error instanceof Error ? fork.error.message : "Fork failed"}
+              </div>
+            )}
+            <div className="my-1 h-px bg-zinc-800" />
+            <button
+              type="button"
+              className="w-full rounded px-2 py-1.5 text-left text-xs text-red-400 hover:bg-zinc-800 hover:text-red-300"
+              onClick={() => setConfirmDelete(true)}
+            >
+              Delete
+            </button>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+function MenuItem({
+  label,
+  onClick,
+  disabled,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      className="w-full rounded px-2 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50"
+      onClick={onClick}
+    >
+      {label}
+    </button>
   );
 }
 

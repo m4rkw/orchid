@@ -1,9 +1,11 @@
 import type {
   AgentInfo,
+  ForkResponse,
   Health,
   MessagesResponse,
   NormalizedMessage,
   Project,
+  ProjectUpdate,
   PromptAccepted,
   SessionDetail,
   SessionSummary,
@@ -70,6 +72,12 @@ export const api = {
   deleteProject: (id: string) =>
     request<void>(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
+  updateProject: (id: string, patch: ProjectUpdate) =>
+    request<Project>(`/api/projects/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
   sessions: (pid: string) =>
     request<SessionSummary[]>(`/api/projects/${encodeURIComponent(pid)}/sessions`),
 
@@ -91,6 +99,36 @@ export const api = {
 
   sessionAgents: (sid: string) =>
     request<AgentInfo[]>(`/api/sessions/${encodeURIComponent(sid)}/agents`),
+
+  renameSession: (sid: string, title: string) =>
+    request<Record<string, never>>(`/api/sessions/${encodeURIComponent(sid)}/rename`, {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    }),
+
+  pinSession: (sid: string, value: boolean) =>
+    request<Record<string, never>>(`/api/sessions/${encodeURIComponent(sid)}/pin`, {
+      method: "POST",
+      body: JSON.stringify({ value }),
+    }),
+
+  archiveSession: (sid: string, value: boolean) =>
+    request<Record<string, never>>(`/api/sessions/${encodeURIComponent(sid)}/archive`, {
+      method: "POST",
+      body: JSON.stringify({ value }),
+    }),
+
+  forkSession: (sid: string, title?: string) =>
+    request<ForkResponse>(`/api/sessions/${encodeURIComponent(sid)}/fork`, {
+      method: "POST",
+      body: JSON.stringify(title === undefined ? {} : { title }),
+    }),
+
+  deleteSession: (sid: string, force?: boolean) =>
+    request<void>(
+      `/api/sessions/${encodeURIComponent(sid)}${force ? "?force=true" : ""}`,
+      { method: "DELETE" },
+    ),
 
   agentMessages: (sid: string, aid: string) =>
     request<{ messages: NormalizedMessage[] }>(

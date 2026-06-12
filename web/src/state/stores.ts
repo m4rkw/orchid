@@ -10,7 +10,9 @@ import type {
 } from "../api/types";
 import { queryClient } from "./queryClient";
 
-export type Selection = { pid: string; sid?: string; compose?: boolean } | null;
+export type Selection =
+  | { pid: string; sid?: string; compose?: boolean; settings?: boolean; drillAgentId?: string }
+  | null;
 
 /** Concatenated text-block content of a message ("" if it has none). */
 export function messageText(message: NormalizedMessage): string {
@@ -123,6 +125,8 @@ type AppState = {
   markMessageFull: (sid: string, message: NormalizedMessage) => void;
   setQueueLen: (sid: string, queueLen: number) => void;
   setAgents: (sid: string, agents: AgentInfo[]) => void;
+  /** Drop a session from the sidebar cache + project badge; clears selection if selected. */
+  removeSession: (pid: string, sid: string) => void;
   resolvePermission: (sid: string, requestId: string) => void;
   expirePermission: (sid: string, requestId: string) => void;
 
@@ -325,6 +329,38 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   setAgents: (sid, agents) => set((s) => ({ agents: { ...s.agents, [sid]: agents } })),
 
+  removeSession: (pid, sid) => {
+    const cached = queryClient.getQueryData<SessionSummary[]>(["sessions", pid]);
+    if (cached?.some((x) => x.id === sid)) {
+      queryClient.setQueryData<SessionSummary[]>(
+        ["sessions", pid],
+        cached.filter((x) => x.id !== sid),
+      );
+      // a removed session decrements the project's badge (floor at 0)
+      queryClient.setQueryData<Project[]>(["projects"], (old) =>
+        old?.map((p) => (p.id === pid ? { ...p, session_count: Math.max(0, p.session_count - 1) } : p)),
+      );
+    }
+    queryClient.removeQueries({ queryKey: ["session", sid] });
+    queryClient.removeQueries({ queryKey: ["session-messages", sid] });
+    queryClient.removeQueries({ queryKey: ["session-agents", sid] });
+    set((s) => {
+      const sessionBuffers = { ...s.sessionBuffers };
+      delete sessionBuffers[sid];
+      const sessionStatuses = { ...s.sessionStatuses };
+      delete sessionStatuses[sid];
+      const queueLens = { ...s.queueLens };
+      delete queueLens[sid];
+      const agents = { ...s.agents };
+      delete agents[sid];
+      const permissions = { ...s.permissions };
+      delete permissions[sid];
+      const selected =
+        s.selected?.pid === pid && s.selected.sid === sid ? null : s.selected;
+      return { sessionBuffers, sessionStatuses, queueLens, agents, permissions, selected };
+    });
+  },
+
   resolvePermission: (sid, requestId) =>
     set((s) => ({
       permissions: {
@@ -401,6 +437,28 @@ export const useAppStore = create<AppState>()((set, get) => ({
           }));
           break;
         }
+        case "session_removed": {
+          const pid = payload.project_id as string;
+          const sid = payload.session_id as string;
+          get().removeSession(pid, sid);
+          break;
+        }
+        case "project_updated": {
+          const project = payload.project as Project;
+          if (!project || typeof project.id !== "string") break;
+          const cached = queryClient.getQueryData<Project[]>(["projects"]);
+          if (cached) {
+            queryClient.setQueryData<Project[]>(
+              ["projects"],
+              cached.some((p) => p.id === project.id)
+                ? cached.map((p) => (p.id === project.id ? { ...p, ...project } : p))
+                : [...cached, project],
+            );
+          } else {
+            void queryClient.invalidateQueries({ queryKey: ["projects"] });
+          }
+          break;
+        }
       }
       return;
     }
@@ -456,8 +514,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
         }
         case "agent_started": {
           const agentId = payload.agent_id as string;
+          const agentType = typeof payload.agent_type === "string" ? payload.agent_type : undefined;
           set((s) => ({
-            agents: { ...s.agents, [sid]: upsertAgent(s.agents[sid], agentId, { status: "running" }) },
+            agents: {
+              ...s.agents,
+              [sid]: upsertAgent(s.agents[sid], agentId, {
+                status: "running",
+                ...(agentType ? { agent_type: agentType } : {}),
+              }),
+            },
           }));
           break;
         }

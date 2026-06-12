@@ -5,7 +5,7 @@ import type { AgentInfo, NormalizedMessage } from "../../api/types";
 import { queryClient } from "../../state/queryClient";
 import { MessageList } from "../common/MessageList";
 
-function AgentDot({ status }: { status: AgentInfo["status"] }) {
+export function AgentDot({ status }: { status: AgentInfo["status"] }) {
   return (
     <span
       aria-label={status}

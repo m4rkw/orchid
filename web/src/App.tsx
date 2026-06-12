@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api/client";
 import { OnboardingChat } from "./components/onboarding/OnboardingChat";
+import { ProjectSettings } from "./components/project/ProjectSettings";
 import { NewSessionComposer } from "./components/session/NewSessionComposer";
 import { SessionView } from "./components/session/SessionView";
 import { ProjectTree } from "./components/tree/ProjectTree";
@@ -49,6 +50,8 @@ export default function App() {
         <main className="min-w-0 flex-1 overflow-hidden">
           {selected?.sid ? (
             <SessionView key={selected.sid} pid={selected.pid} sid={selected.sid} />
+          ) : selected?.settings ? (
+            <ProjectSettings key={`settings-${selected.pid}`} pid={selected.pid} />
           ) : selected?.compose ? (
             <NewSessionComposer key={selected.pid} pid={selected.pid} />
           ) : (
