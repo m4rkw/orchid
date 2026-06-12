@@ -1,6 +1,7 @@
 import type { WsEvent } from "../api/types";
 
 type EventHandler = (event: WsEvent) => void;
+export type WsStatus = "connecting" | "open" | "closed";
 
 const MIN_DELAY_MS = 500;
 const MAX_DELAY_MS = 8_000;
@@ -27,12 +28,30 @@ class SocketManager {
   private attempt = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private started = false;
+  private status: WsStatus = "closed";
+  private statusHandlers = new Set<() => void>();
 
   /** Idempotent; call once at app startup. */
   connect(): void {
     if (this.started) return;
     this.started = true;
     this.open();
+  }
+
+  /** useSyncExternalStore-compatible: subscribe to status changes. */
+  subscribeStatus = (cb: () => void): (() => void) => {
+    this.statusHandlers.add(cb);
+    return () => {
+      this.statusHandlers.delete(cb);
+    };
+  };
+
+  getStatus = (): WsStatus => this.status;
+
+  private setStatus(next: WsStatus): void {
+    if (this.status === next) return;
+    this.status = next;
+    for (const cb of this.statusHandlers) cb();
   }
 
   /** Register a handler for every incoming WsEvent. Returns an unsubscribe fn. */
@@ -70,10 +89,12 @@ class SocketManager {
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${location.host}/ws`);
     this.ws = ws;
+    this.setStatus("connecting");
 
     ws.onopen = () => {
       this.attempt = 0;
       this.lastSeq.clear(); // seq is per-connection; never compare across connects
+      this.setStatus("open");
       for (const topic of this.topics) {
         ws.send(JSON.stringify({ type: "subscribe", topic }));
       }
@@ -102,6 +123,7 @@ class SocketManager {
     ws.onclose = () => {
       if (this.ws === ws) {
         this.ws = null;
+        this.setStatus("closed");
         this.scheduleReconnect();
       }
     };

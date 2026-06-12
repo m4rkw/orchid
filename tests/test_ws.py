@@ -27,6 +27,14 @@ async def test_sidebar_event_on_project_create(server, homes):
     assert evt["payload"]["project"]["root"] == str(target.resolve())
 
 
+async def test_onboarding_messages_recovery_endpoint(server):
+    # Before any prompt the onboarding session has no id → empty, not running.
+    r = await asyncio.to_thread(requests.get, f"{server}/api/onboarding/messages", timeout=5)
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {"messages": [], "running": False}
+
+
 async def test_subscribe_roundtrip_accepted(server):
     ws_url = server.replace("http://", "ws://") + "/ws"
     async with connect(ws_url) as ws:

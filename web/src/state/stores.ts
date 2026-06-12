@@ -110,6 +110,8 @@ type AppState = {
   focusComposer: () => void;
   appendOnboardingUser: (text: string) => void;
   setOnboardingError: (message: string | null) => void;
+  /** Reconcile the onboarding chat from GET /onboarding/messages (history + true running). */
+  loadOnboarding: (messages: NormalizedMessage[], running: boolean) => void;
   resetOnboarding: () => void;
 
   /** Make sure a buffer exists for sid (call before subscribing to its topic). */
@@ -236,6 +238,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
         running: message === null ? s.onboarding.running : false,
       },
     })),
+
+  loadOnboarding: (messages, running) =>
+    set((s) => ({ onboarding: { ...s.onboarding, messages, running, lastError: null } })),
 
   resetOnboarding: () => set({ onboarding: { messages: [], running: false, lastError: null } }),
 

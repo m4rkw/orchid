@@ -160,4 +160,7 @@ export const api = {
 
   onboardingReset: () =>
     request<Record<string, never>>("/api/onboarding/reset", { method: "POST" }),
+
+  onboardingMessages: () =>
+    request<{ messages: NormalizedMessage[]; running: boolean }>("/api/onboarding/messages"),
 };

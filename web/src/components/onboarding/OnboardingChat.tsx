@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { clsx } from "clsx";
 import { api } from "../../api/client";
 import { useAppStore } from "../../state/stores";
+import { useWsStatus } from "../../ws/useWsStatus";
 import { MessageList } from "../common/MessageList";
 
 const MAX_COMPOSER_HEIGHT_PX = 144; // ~6 lines at 24px line-height
@@ -13,7 +14,31 @@ export function OnboardingChat() {
   const composerFocusKey = useAppStore((s) => s.composerFocusKey);
   const appendOnboardingUser = useAppStore((s) => s.appendOnboardingUser);
   const setOnboardingError = useAppStore((s) => s.setOnboardingError);
+  const loadOnboarding = useAppStore((s) => s.loadOnboarding);
   const resetOnboarding = useAppStore((s) => s.resetOnboarding);
+
+  const ws = useWsStatus();
+  const wsOpen = ws === "open";
+  // Without the live socket we can't observe a turn finishing, so "running" is
+  // meaningless: don't lock the composer on it. Show the offline state instead.
+  const blocked = running && wsOpen;
+
+  // Recover history + the true running state whenever the socket (re)connects —
+  // this clears a spinner left stuck by a missed turn_completed and restores the
+  // chat after a reload.
+  useEffect(() => {
+    if (ws !== "open") return;
+    let cancelled = false;
+    void api
+      .onboardingMessages()
+      .then((res) => {
+        if (!cancelled) loadOnboarding(res.messages, res.running);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [ws, loadOnboarding]);
 
   const [value, setValue] = useState("");
   const [resetting, setResetting] = useState(false);
@@ -32,7 +57,7 @@ export function OnboardingChat() {
     if (stickToBottom.current) {
       scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
     }
-  }, [messages, running]);
+  }, [messages, blocked]);
 
   // Auto-grow the composer up to ~6 lines.
   useEffect(() => {
@@ -47,12 +72,12 @@ export function OnboardingChat() {
     textareaRef.current?.focus();
   }, [composerFocusKey]);
   useEffect(() => {
-    if (!running) textareaRef.current?.focus();
-  }, [running]);
+    if (!blocked) textareaRef.current?.focus();
+  }, [blocked]);
 
   const send = async () => {
     const text = value.trim();
-    if (!text || running) return;
+    if (!text || blocked || !wsOpen) return;
     setValue("");
     appendOnboardingUser(text); // optimistic; also flips running on
     try {
@@ -92,7 +117,7 @@ export function OnboardingChat() {
       </div>
 
       <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto">
-        {messages.length === 0 ? <EmptyHero /> : <MessageList messages={messages} running={running} />}
+        {messages.length === 0 ? <EmptyHero /> : <MessageList messages={messages} running={blocked} />}
       </div>
 
       <div className="shrink-0 border-t border-zinc-800 p-4 pt-3">
@@ -113,15 +138,16 @@ export function OnboardingChat() {
         <div
           className={clsx(
             "relative mx-auto flex max-w-3xl items-end gap-2 rounded-xl border bg-ink-900 px-3 py-2 transition-colors",
-            running ? "border-violet-500/40" : "border-zinc-700 focus-within:border-violet-500/60",
+            blocked ? "border-violet-500/40" : "border-zinc-700 focus-within:border-violet-500/60",
+            !wsOpen && "border-amber-500/40",
           )}
         >
           <textarea
             ref={textareaRef}
             rows={1}
             value={value}
-            disabled={running}
-            placeholder={running ? "" : "Ask Claude to onboard a project…"}
+            disabled={blocked || !wsOpen}
+            placeholder={blocked || !wsOpen ? "" : "Ask Claude to onboard a project…"}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -131,15 +157,21 @@ export function OnboardingChat() {
             }}
             className="max-h-36 min-h-6 w-full resize-none bg-transparent text-sm leading-6 text-zinc-100 outline-none placeholder:text-zinc-600 disabled:opacity-50"
           />
-          {running && (
-            <div className="pointer-events-none absolute inset-y-0 left-3 flex animate-pulse items-center text-sm text-violet-300/80">
-              Claude is working…
+          {!wsOpen ? (
+            <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-amber-300/80">
+              Live connection offline — reconnect to chat
             </div>
+          ) : (
+            blocked && (
+              <div className="pointer-events-none absolute inset-y-0 left-3 flex animate-pulse items-center text-sm text-violet-300/80">
+                Claude is working…
+              </div>
+            )
           )}
           <button
             type="button"
             onClick={() => void send()}
-            disabled={running || value.trim() === ""}
+            disabled={blocked || !wsOpen || value.trim() === ""}
             className="mb-px shrink-0 rounded-lg bg-violet-600 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-violet-600"
           >
             Send

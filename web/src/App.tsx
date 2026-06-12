@@ -6,9 +6,11 @@ import { NewSessionComposer } from "./components/session/NewSessionComposer";
 import { SessionView } from "./components/session/SessionView";
 import { ProjectTree } from "./components/tree/ProjectTree";
 import { useAppStore } from "./state/stores";
+import { useWsStatus } from "./ws/useWsStatus";
 
 export default function App() {
   const selected = useAppStore((s) => s.selected);
+  const ws = useWsStatus();
   const health = useQuery({
     queryKey: ["health"],
     queryFn: api.health,
@@ -25,23 +27,34 @@ export default function App() {
             Orchid
           </span>
         </div>
-        <div
-          className="text-[11px] text-zinc-600"
-          title={
-            health.data
-              ? `orchid ${health.data.version} · sdk ${health.data.sdk_version} · config ${health.data.config_dir} · home ${health.data.orchid_home}`
-              : undefined
-          }
-        >
-          {health.data ? (
-            <>claude {health.data.claude_cli_version}</>
-          ) : health.isError ? (
-            <span className="text-amber-500/80">backend offline</span>
-          ) : (
-            "…"
-          )}
+        <div className="flex items-center gap-3">
+          <WsIndicator status={ws} />
+          <div
+            className="text-[11px] text-zinc-600"
+            title={
+              health.data
+                ? `orchid ${health.data.version} · sdk ${health.data.sdk_version} · config ${health.data.config_dir} · home ${health.data.orchid_home}`
+                : undefined
+            }
+          >
+            {health.data ? (
+              <>claude {health.data.claude_cli_version}</>
+            ) : health.isError ? (
+              <span className="text-amber-500/80">backend offline</span>
+            ) : (
+              "…"
+            )}
+          </div>
         </div>
       </header>
+
+      {ws !== "open" && (
+        <div className="shrink-0 border-b border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-center text-[11px] text-amber-300">
+          {ws === "connecting" ? "Connecting to Orchid…" : "Live connection lost"} — sessions and the
+          onboarding chat won't update until the WebSocket reconnects. If you're behind a proxy, it must
+          support WebSockets (HTTP/1.1); otherwise reach Orchid directly on its port.
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-80 shrink-0 flex-col overflow-hidden border-r border-zinc-800">
@@ -60,5 +73,19 @@ export default function App() {
         </main>
       </div>
     </div>
+  );
+}
+
+function WsIndicator({ status }: { status: "connecting" | "open" | "closed" }) {
+  const meta = {
+    open: { color: "bg-emerald-500", label: "live", title: "Live updates connected" },
+    connecting: { color: "bg-amber-400 animate-pulse", label: "connecting", title: "Connecting…" },
+    closed: { color: "bg-red-500", label: "offline", title: "Live connection lost — reconnecting" },
+  }[status];
+  return (
+    <span className="flex items-center gap-1.5 text-[11px] text-zinc-500" title={meta.title}>
+      <span className={`h-1.5 w-1.5 rounded-full ${meta.color}`} />
+      {meta.label}
+    </span>
   );
 }
