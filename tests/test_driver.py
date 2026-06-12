@@ -63,10 +63,9 @@ async def test_happy_turn_event_order(fake_runner):
     await driver.prompt("hi")
     events = await drain_until(sub, "turn_completed")
     types = [e["type"] for e in events]
-    assert types == ["turn_started", "message", "message", "turn_completed"]
+    assert types == ["turn_started", "message", "turn_completed"]
     assert events[1]["payload"]["message"]["role"] == "assistant"
-    assert events[2]["payload"]["message"]["role"] == "result"
-    assert events[3]["payload"]["total_cost_usd"] == 0.01
+    assert events[2]["payload"]["total_cost_usd"] == 0.01
     assert driver.session_id == "sid-1"
     assert specs[0].resume is None
     await driver.aclose()

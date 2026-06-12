@@ -98,10 +98,11 @@ class SessionDriver:
                     if msg.subtype == "init" and msg.data.get("session_id"):
                         self.session_id = msg.data["session_id"]
                     continue
-                normalized = normalize_stream_message(msg)
-                if normalized is not None:
-                    self._bus.publish(self._topic, "message", {"message": normalized.model_dump()})
-                if isinstance(msg, ResultMessage):
+                if not isinstance(msg, ResultMessage):
+                    normalized = normalize_stream_message(msg)
+                    if normalized is not None:
+                        self._bus.publish(self._topic, "message", {"message": normalized.model_dump()})
+                else:  # the UI synthesizes the turn divider from turn_completed
                     self.session_id = msg.session_id
                     self._bus.publish(
                         self._topic,
