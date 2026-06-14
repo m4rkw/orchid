@@ -1,4 +1,5 @@
 import asyncio
+import re
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,10 @@ from ..services import ApiError, ProjectService
 from ..store import review_store
 
 router = APIRouter()
+
+# Heuristic for "this change touches tests" — used to flag branches where the
+# reviewer must confirm tests weren't weakened to pass (reward-hack resistance).
+_TEST_PATH_RE = re.compile(r"(^|/)(tests?|spec)/|(_test\.|\.test\.|\.spec\.|conftest\.py$)", re.I)
 
 
 def _service(request: Request) -> ProjectService:
@@ -27,7 +32,23 @@ async def get_review(request: Request, project_id: str, review_id: str):
     review = review_store.read_review(root, review_id)
     if review is None:
         raise ApiError("REVIEW_NOT_FOUND", f"no review {review_id}", 404)
-    return review
+    # Enrich (computed on read, never stored, so it always reflects the branch as-is):
+    # which files changed, and whether any are tests — the agent can't fake this.
+    files = await _changed_files(root, review.get("branch", ""))
+    return {
+        **review,
+        "files_changed": len(files),
+        "touches_tests": any(_TEST_PATH_RE.search(f) for f in files),
+    }
+
+
+async def _changed_files(root: Path, branch: str) -> list[str]:
+    if not branch:
+        return []
+    base = await _find_base_branch(root, branch)
+    spec = f"{base}...{branch}" if base else branch
+    rc, out = await _run_git(root, "diff", "--name-only", spec)
+    return [line.strip() for line in out.splitlines() if line.strip()] if rc == 0 else []
 
 
 @router.get("/projects/{project_id}/reviews/{review_id}/diff")

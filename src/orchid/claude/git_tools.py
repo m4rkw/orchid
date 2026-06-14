@@ -38,7 +38,7 @@ async def _run_git(root: Path, *args: str, timeout: float = 30) -> tuple[int, st
     return proc.returncode, out.decode(errors="replace")
 
 
-def build_git_tools(root: Path, project_id: str, bus: EventBus) -> list[Any]:
+def build_git_tools(root: Path, project_id: str, bus: EventBus, notifier: Any = None) -> list[Any]:
 
     @tool("create_branch", "Create and switch to a new branch from the current HEAD.",
           {"branch_name": str})
@@ -92,12 +92,15 @@ def build_git_tools(root: Path, project_id: str, bus: EventBus) -> list[Any]:
         return _text(out)
 
     @tool("request_review",
-          "Submit the current branch for review. The review goes to a human or reviewer agent "
-          "depending on the project's review_mode.",
-          {"branch": str, "summary": str})
+          "Submit the current branch for review. Include `verification`: the exact checks you "
+          "ran and their output (the verifier's pass/fail report — test/typecheck/lint command + "
+          "result), so the reviewer approves against observed evidence, not a claim. The review "
+          "goes to a human or reviewer agent depending on the project's review_mode.",
+          {"branch": str, "summary": str, "verification": str})
     async def request_review(args: dict[str, Any]) -> dict[str, Any]:
         branch = (args.get("branch") or "").strip()
         summary = (args.get("summary") or "").strip()
+        verification = (args.get("verification") or "").strip()
         if not branch or not summary:
             return _text("Both branch and summary are required.", is_error=True)
         file = project_store.read_project_file(root)
@@ -107,6 +110,7 @@ def build_git_tools(root: Path, project_id: str, bus: EventBus) -> list[Any]:
         review_store.write_review(root, {
             "id": review_id, "project_id": project_id, "branch": branch,
             "summary": summary, "status": "pending", "reviewer_notes": None,
+            "verification": verification or None,
             "created_at": __import__("datetime").datetime.now(
                 __import__("datetime").timezone.utc).isoformat(),
         })
@@ -114,12 +118,25 @@ def build_git_tools(root: Path, project_id: str, bus: EventBus) -> list[Any]:
             "project_id": project_id, "review_id": review_id,
             "branch": branch, "summary": summary, "review_mode": review_mode,
         })
+        if notifier is not None and review_mode != "autonomous":
+            __import__("asyncio").create_task(notifier.push(
+                "Orchid — review requested",
+                f"{branch}: {summary}",
+                url=notifier.review_url(project_id, review_id),
+                url_title="Review in Orchid",
+            ))
+        warn = "" if verification else (
+            " No verification evidence was attached — correctness will be treated as "
+            "UNCONFIRMED; run the project's checks and resubmit with the output."
+        )
         if review_mode == "autonomous":
-            return _text(f"Review requested (id={review_id}). The reviewer agent will review branch '{branch}' automatically.")
-        return _text(f"Review requested (id={review_id}). Waiting for manual review of branch '{branch}'.")
+            return _text(f"Review requested (id={review_id}). The reviewer agent will review branch '{branch}' automatically.{warn}")
+        return _text(f"Review requested (id={review_id}). Waiting for manual review of branch '{branch}'.{warn}")
 
     return [create_branch, git_status, git_commit, git_diff, request_review]
 
 
-def build_git_server(root: Path, project_id: str, bus: EventBus) -> Any:
-    return create_sdk_mcp_server(GIT_SERVER, "0.1.0", tools=build_git_tools(root, project_id, bus))
+def build_git_server(root: Path, project_id: str, bus: EventBus, notifier: Any = None) -> Any:
+    return create_sdk_mcp_server(
+        GIT_SERVER, "0.1.0", tools=build_git_tools(root, project_id, bus, notifier),
+    )

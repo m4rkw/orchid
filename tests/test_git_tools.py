@@ -69,6 +69,43 @@ async def test_request_review_publishes_event(harness):
 
 
 @pytest.mark.anyio
+async def test_request_review_persists_verification(harness):
+    root, bus, tools = harness
+    await tools["create_branch"].handler({"branch_name": "feat/v"})
+    (root / "y.txt").write_text("y\n")
+    await tools["git_commit"].handler({"message": "add y", "paths": "."})
+    out = _text_of(await tools["request_review"].handler({
+        "branch": "feat/v", "summary": "Added y",
+        "verification": "uv run pytest -q\n42 passed",
+    }))
+    assert "rev_" in out and "UNCONFIRMED" not in out
+    from orchid.store import review_store
+    reviews = review_store.list_reviews(root)
+    assert reviews and reviews[0]["verification"] == "uv run pytest -q\n42 passed"
+
+
+@pytest.mark.anyio
+async def test_request_review_warns_without_verification(harness):
+    root, bus, tools = harness
+    await tools["create_branch"].handler({"branch_name": "feat/nov"})
+    (root / "z.txt").write_text("z\n")
+    await tools["git_commit"].handler({"message": "add z", "paths": "."})
+    out = _text_of(await tools["request_review"].handler({"branch": "feat/nov", "summary": "Added z"}))
+    assert "UNCONFIRMED" in out
+    from orchid.store import review_store
+    assert review_store.list_reviews(root)[0]["verification"] is None
+
+
+def test_test_path_heuristic():
+    from orchid.api.reviews import _TEST_PATH_RE
+    for p in ["tests/test_x.py", "src/foo_test.go", "a/b.test.ts",
+              "spec/thing_spec.rb", "conftest.py", "pkg/spec/helper.js"]:
+        assert _TEST_PATH_RE.search(p), f"should match: {p}"
+    for p in ["src/main.py", "README.md", "lib/contest.py", "specimen.py"]:
+        assert not _TEST_PATH_RE.search(p), f"should NOT match: {p}"
+
+
+@pytest.mark.anyio
 async def test_create_branch_bad_name(harness):
     _, _, tools = harness
     out = await tools["create_branch"].handler({"branch_name": "..bad"})

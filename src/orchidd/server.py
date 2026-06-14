@@ -152,6 +152,8 @@ class OrchiddServer:
             result = await ops.delete_file(path)
         elif op == "mkdir":
             result = await ops.mkdir(path)
+        elif op == "chmod":
+            result = await ops.chmod(path, params.get("mode", ""))
         elif op == "stat":
             result = await ops.file_stat(path)
         else:

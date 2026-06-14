@@ -53,6 +53,7 @@ class DriverManager:
         watcher: WatcherManager,
         settings: Settings,
         orchidd_client=None,
+        notifier=None,
     ):
         self._runner = runner
         self._bus = bus
@@ -61,6 +62,7 @@ class DriverManager:
         self._watcher = watcher
         self._settings = settings
         self._orchidd = orchidd_client
+        self._notifier = notifier
         self._drivers: dict[str, SessionDriver] = {}
         self._projects_of: dict[str, str] = {}  # sid -> project_id
         self._roots_of: dict[str, Path] = {}  # sid -> project root
@@ -257,7 +259,7 @@ class DriverManager:
         root = Path(project["root"])
         agents, append = roles.assemble_orchestrator(root, child_roots=child_roots)
         plan_server = build_plan_server(root, project["id"], self._bus)
-        git_server = build_git_server(root, project["id"], self._bus)
+        git_server = build_git_server(root, project["id"], self._bus, notifier=self._notifier)
         driver = self._build_driver(
             root, project["id"], session_id=None,
             system_prompt={"type": "preset", "preset": "claude_code", "append": append},
@@ -350,9 +352,20 @@ class DriverManager:
                 datetime.now(timezone.utc) + timedelta(seconds=PERMISSION_TIMEOUT_S)
             ).isoformat(),
         }
+        # Push only on the first pending request for this session, so a burst of
+        # tool calls in one turn doesn't fan out into a stream of phone pings.
+        first_pending = not self.pending_permissions(session_id) if session_id else False
         self._perms[request_id] = (fut, session_id, payload)
         if session_id:
             self._bus.publish(f"session:{session_id}", "permission_request", payload)
+            if first_pending and self._notifier:
+                pid = self._projects_of.get(session_id)
+                asyncio.create_task(self._notifier.push(
+                    "Orchid — approval needed",
+                    f"{tool_name} is waiting for your decision.",
+                    url=self._notifier.session_url(pid, session_id),
+                    url_title="Review in Orchid",
+                ))
         try:
             behavior, message = await asyncio.wait_for(fut, PERMISSION_TIMEOUT_S)
         except asyncio.TimeoutError:

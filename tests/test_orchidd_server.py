@@ -94,6 +94,29 @@ async def test_edit_file_preserves_mode(setup):
     assert result["mode"] == "0755"
 
 
+async def test_chmod(setup):
+    import os
+    import stat as stat_mod
+
+    client, root, _ = setup
+    target = root / "script.sh"
+    target.write_text("#!/bin/sh\necho hi\n")
+    os.chmod(target, 0o644)
+    result = await client.chmod(str(root), str(target), "0755")
+    assert result["mode"] == "0755"
+    assert stat_mod.S_IMODE(target.stat().st_mode) == 0o755
+
+
+async def test_chmod_denied_without_write_grant(setup, tmp_path):
+    """A path outside the granted root is refused (chmod maps to file_write)."""
+    client, root, _ = setup
+    outside = tmp_path / "outside.txt"
+    outside.write_text("x")
+    with pytest.raises(OrchiddError) as exc:
+        await client.chmod(str(root), str(outside), "0755")
+    assert exc.value.code == "ACL_DENIED"
+
+
 async def test_delete_file(setup):
     client, root, _ = setup
     target = root / "deleteme.txt"

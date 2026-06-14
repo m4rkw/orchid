@@ -19,6 +19,7 @@ _TOOLS = [
     "elevated_edit_file",
     "elevated_delete_file",
     "elevated_mkdir",
+    "elevated_chmod",
     "elevated_exec",
     "elevated_stat",
 ]
@@ -121,6 +122,25 @@ def build_elevated_tools(client: OrchiddClient) -> list[Any]:
             return _text(f"Error: {e.message}", is_error=True)
 
     @tool(
+        "elevated_chmod",
+        "Set the permission bits of a root-owned path (elevated via orchidd) WITHOUT rewriting "
+        "its contents — use this to fix a mode (e.g. restore an executable bit) instead of "
+        "re-sending a whole file. mode is octal like '0755'. Path must be under an "
+        "orchidd-granted directory.",
+        {"path": str, "mode": str},
+    )
+    async def elevated_chmod(args: dict[str, Any]) -> dict[str, Any]:
+        path = args.get("path", "")
+        mode = args.get("mode", "")
+        if not path or not mode:
+            return _text("path and mode are required", is_error=True)
+        try:
+            result = await client.chmod("", path, mode)
+            return _text(f"Set mode {result['mode']} on {result['path']}.")
+        except OrchiddError as e:
+            return _text(f"Error: {e.message}", is_error=True)
+
+    @tool(
         "elevated_exec",
         "Run a whitelisted command with elevated privileges (via orchidd). Only "
         "commands explicitly allowed in the orchidd ACL will succeed.",
@@ -166,7 +186,7 @@ def build_elevated_tools(client: OrchiddClient) -> list[Any]:
 
     return [
         elevated_read_file, elevated_write_file, elevated_edit_file,
-        elevated_delete_file, elevated_mkdir, elevated_exec, elevated_stat,
+        elevated_delete_file, elevated_mkdir, elevated_chmod, elevated_exec, elevated_stat,
     ]
 
 

@@ -73,6 +73,20 @@ async def edit_file(path: str, old_text: str, new_text: str, max_size: int) -> d
     return {"path": str(p), "mode": format(orig_mode, "04o")}
 
 
+async def chmod(path: str, mode: str) -> dict:
+    """Set permission bits without touching contents — the cheap operation that
+    full-file rewrites shouldn't be needed for (e.g. restoring an exec bit)."""
+    p = _canonicalize(path)
+    if not p.exists():
+        raise OpError("NOT_FOUND", f"{p} does not exist")
+    try:
+        bits = int(mode, 8)
+    except (ValueError, TypeError):
+        raise OpError("INVALID_MODE", f"mode must be octal like '0755', got {mode!r}")
+    os.chmod(p, bits)
+    return {"path": str(p), "mode": format(stat_mod.S_IMODE(p.stat().st_mode), "04o")}
+
+
 async def delete_file(path: str) -> dict:
     p = _canonicalize(path)
     if not p.exists():

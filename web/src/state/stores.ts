@@ -12,6 +12,7 @@ import type {
   WsEvent,
 } from "../api/types";
 import { api } from "../api/client";
+import { notify } from "../notify";
 import { queryClient } from "./queryClient";
 
 export type ProjectSelection = { pid: string; sid?: string; compose?: boolean; settings?: boolean; plans?: boolean; reviews?: boolean; reviewId?: string; drillAgentId?: string };
@@ -584,6 +585,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
           const pid = payload.project_id as string;
           void queryClient.invalidateQueries({ queryKey: ["reviews", pid] });
           void queryClient.invalidateQueries({ queryKey: ["activity", pid] });
+          if (type === "review_requested") {
+            const reviewId = payload.review_id as string;
+            notify({
+              title: "Orchid — review requested",
+              body: typeof payload.branch === "string" ? payload.branch : "A branch is ready for review",
+              tag: `review:${reviewId}`,
+              onClick: () => get().select({ pid, reviews: true, reviewId }),
+            });
+          }
           break;
         }
         case "usage_updated": {
@@ -678,6 +688,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
             const cards = s.permissions[sid] ?? [];
             if (cards.some((p) => p.request_id === card.request_id)) return s;
             return { permissions: { ...s.permissions, [sid]: [...cards, { ...card, expired: false }] } };
+          });
+          notify({
+            title: "Orchid — approval needed",
+            body: `${card.display_name || card.tool_name} is waiting for your decision`,
+            tag: `perm:${sid}`,
           });
           break;
         }

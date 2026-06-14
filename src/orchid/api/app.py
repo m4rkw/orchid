@@ -55,8 +55,10 @@ def create_app(settings: Settings | None = None, runner: Runner | None = None) -
         from ..orchidd.client import OrchiddClient
         orchidd_client = OrchiddClient()
         onboarding = build_onboarding_driver(active_runner, bus, service, settings)
+        from ..notify import Notifier
+        notifier = Notifier(settings)
         driver_manager = DriverManager(active_runner, bus, cache, session_service, watcher, settings,
-                                       orchidd_client=orchidd_client)
+                                       orchidd_client=orchidd_client, notifier=notifier)
         from ..claude.collaboration import CollaborationManager
         collab_manager = CollaborationManager(driver_manager, registry, bus, settings,
                                                 project_service=service)

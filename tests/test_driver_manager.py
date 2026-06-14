@@ -153,6 +153,48 @@ async def test_write_tools_still_gated(harness):
     await h.manager.aclose()
 
 
+class _FakeNotifier:
+    def __init__(self):
+        self.pushes = []
+
+    def session_url(self, pid, sid):
+        return f"u/{pid}/{sid}"
+
+    async def push(self, title, message, url=None, url_title=None):
+        self.pushes.append((title, message, url))
+
+
+async def test_permission_request_pushes_once_per_burst(harness):
+    h = harness([])
+    fake = _FakeNotifier()
+    h.manager._notifier = fake
+    h.manager._projects_of[SID] = "prj_d"
+
+    t1 = asyncio.create_task(h.manager._request_permission(SID, "Bash", {"command": "ls"}, None))
+    await wait_for(lambda: len(h.manager.pending_permissions(SID)) == 1)
+    # A second concurrent request in the same burst must NOT fire another push.
+    t2 = asyncio.create_task(h.manager._request_permission(SID, "Write", {}, None))
+    await wait_for(lambda: len(h.manager.pending_permissions(SID)) == 2)
+    await asyncio.sleep(0.02)  # let the push task run
+
+    assert len(fake.pushes) == 1
+    assert fake.pushes[0][2] == f"u/prj_d/{SID}"
+
+    for p in list(h.manager.pending_permissions(SID)):
+        await h.manager.resolve_permission(p["request_id"], "allow")
+    await t1
+    await t2
+    await h.manager.aclose()
+
+
+async def test_read_only_request_does_not_push(harness):
+    h = harness([])
+    fake = _FakeNotifier()
+    h.manager._notifier = fake
+    await h.manager._request_permission(SID, "Grep", {}, None)
+    assert fake.pushes == []  # auto-allowed before the broker / notifier
+
+
 async def test_create_session_timeout_504(harness, monkeypatch):
     gate = asyncio.Event()  # stream yields nothing, blocks forever
     h = harness([[[gate]]])

@@ -53,6 +53,7 @@ def check_file_op(grant: dict[str, Any], op: str, target_path: str) -> str | Non
         "edit_file": "file_write",
         "delete_file": "file_delete",
         "mkdir": "file_write",
+        "chmod": "file_write",
         "stat": "file_read",
     }.get(op)
     if not op_key:

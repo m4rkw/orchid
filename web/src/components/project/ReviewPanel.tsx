@@ -139,6 +139,13 @@ function ReviewDetail({ pid, review }: { pid: string; review: ReviewRequest }) {
     queryKey: ["review-diff", pid, review.id],
     queryFn: () => api.reviewDiff(pid, review.id),
   });
+  // The single-review GET enriches with verification + the server-computed
+  // touches_tests / files_changed flags (the list response omits those).
+  const full = useQuery({
+    queryKey: ["review", pid, review.id],
+    queryFn: () => api.projectReview(pid, review.id),
+  });
+  const detail = full.data ?? review;
   const [notes, setNotes] = useState("");
 
   const approve = useMutation({
@@ -192,10 +199,34 @@ function ReviewDetail({ pid, review }: { pid: string; review: ReviewRequest }) {
         </div>
       )}
 
+      {/* Verification evidence — approve against observed output, not a claim. */}
+      <div className="mb-4">
+        <div className="mb-1 flex items-center gap-2 text-[10px] font-medium tracking-wider text-zinc-500 uppercase">
+          Verification
+          {detail.touches_tests && (
+            <span className="rounded-full bg-amber-500/20 px-1.5 py-px text-[9px] font-medium text-amber-300 normal-case">
+              ⚠ modifies tests — confirm not weakened
+            </span>
+          )}
+        </div>
+        {detail.verification ? (
+          <pre className="max-h-48 overflow-auto rounded border border-zinc-800 bg-ink-950 px-3 py-2 font-mono text-[11px] leading-5 whitespace-pre-wrap text-zinc-300">
+            {detail.verification}
+          </pre>
+        ) : (
+          <div className="rounded border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-300">
+            ⚠ No verification evidence attached — correctness is unconfirmed. Scrutinize accordingly.
+          </div>
+        )}
+      </div>
+
       {/* Diff viewer */}
       <div className="mb-4">
         <div className="mb-1 text-[10px] font-medium tracking-wider text-zinc-500 uppercase">
           Diff
+          {typeof detail.files_changed === "number" && detail.files_changed > 0 && (
+            <span className="ml-2 normal-case text-zinc-600">({detail.files_changed} files)</span>
+          )}
         </div>
         {diff.isPending ? (
           <div className="py-4 text-center text-xs text-zinc-600">Loading diff…</div>

@@ -255,4 +255,9 @@ export type ReviewRequest = {
   status: ReviewStatus;
   reviewer_notes: string | null;
   created_at: string | null;
+  /** Observed checks the submitter ran (verifier output). Null = no evidence attached. */
+  verification: string | null;
+  /** Computed server-side on the single-review GET only (absent from the list response). */
+  touches_tests?: boolean;
+  files_changed?: number;
 };

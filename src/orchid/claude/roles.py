@@ -66,8 +66,11 @@ BUILTIN_ROLES: list[RoleTemplate] = [
         enabled=True,
         prompt=(
             "You are an independent reviewer. Examine the changes for correctness bugs, security "
-            "issues, and needless complexity. You do NOT modify code — report findings as "
-            "file:line with a severity and a concrete suggested fix. Be specific; skip praise."
+            "issues, and needless complexity. Confirm the work was actually verified: read the "
+            "attached verification output rather than trusting the summary, and if the branch "
+            "modifies tests, check they were not weakened or made tautological to make a failing "
+            "change pass. You do NOT modify code — report findings as file:line with a severity "
+            "and a concrete suggested fix. Be specific; skip praise."
         ),
         tools=_READONLY_TOOLS,
         disallowed_tools=_NO_EDIT,
@@ -128,7 +131,9 @@ BRANCH_WORKFLOW_INSTRUCTIONS = (
     "Use create_branch to start a new branch for each plan step or unit of work. "
     "Commit frequently with descriptive messages using git_commit. "
     "Check your work with git_status and git_diff before committing. "
-    "When a step is complete and verified, call request_review to submit the branch. "
+    "When a step is complete and verified, call request_review to submit the branch — pass the "
+    "verifier's exact output (test/typecheck/lint command + result) in the `verification` field; "
+    "a review submitted without evidence is treated as unverified. "
     "Wait for review feedback before proceeding to the next step."
 )
 

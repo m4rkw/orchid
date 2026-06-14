@@ -103,6 +103,9 @@ class OrchiddClient:
     async def mkdir(self, project_root: str, path: str) -> dict[str, Any]:
         return await self._request("mkdir", project_root, path=path)
 
+    async def chmod(self, project_root: str, path: str, mode: str) -> dict[str, Any]:
+        return await self._request("chmod", project_root, path=path, mode=mode)
+
     async def stat(self, project_root: str, path: str) -> dict[str, Any]:
         return await self._request("stat", project_root, path=path)
 

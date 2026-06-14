@@ -15,6 +15,7 @@ VALID_OPS = frozenset({
     "edit_file",
     "delete_file",
     "mkdir",
+    "chmod",
     "exec",
     "stat",
 })
