@@ -53,6 +53,7 @@ def map_summary(info: Any, flags: dict[str, Any]) -> SessionSummary:
         pinned=bool(flags.get("pinned", False)),
         archived=bool(flags.get("archived", False)),
         created_by="orchid" if flags.get("created_by") == "orchid" else "external",
+        role=flags.get("role"),
     )
 
 

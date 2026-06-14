@@ -10,6 +10,19 @@ export function PermissionCard({ sid, card }: { sid: string; card: PermissionCar
   const [pending, setPending] = useState<"allow" | "deny" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Enter key accepts the permission request.
+  useEffect(() => {
+    if (card.expired) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && pending === null) {
+        e.preventDefault();
+        void respond("allow");
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  });
+
   // Auto-dim when expires_at passes.
   useEffect(() => {
     if (card.expired) return;

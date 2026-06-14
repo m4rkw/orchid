@@ -16,6 +16,11 @@ class Project(BaseModel):
     root: str
     session_count: int = 0
     missing: bool = False
+    intent: Literal["adhoc", "goal"] | None = None
+    goal: str | None = None
+    review_mode: Literal["manual", "autonomous"] | None = None
+    project_type: Literal["application", "meta"] | None = None
+    children: list[str] = []
 
 
 class SessionSummary(BaseModel):
@@ -28,17 +33,59 @@ class SessionSummary(BaseModel):
     pinned: bool = False
     archived: bool = False
     created_by: Literal["orchid", "external"] = "external"
+    role: str | None = None
 
 
 class SessionDetail(SessionSummary):
     project_id: str
     handoff_command: str
+    cost_usd: float | None = None
+    turns: int = 0
 
 
 class AgentInfo(BaseModel):
     agent_id: str
     message_count: int = 0
     status: Literal["running", "done"] = "done"
+
+
+# -- agent roles & plans ----------------------------------------------------
+
+# orchestrator = the session you drive; subagent = materialized via the SDK
+# `agents=` option; infra = a role already covered by Orchid/the model, shipped
+# as an off-by-default template so the full taxonomy stays visible and editable.
+RoleKind = Literal["orchestrator", "subagent", "infra"]
+
+
+class RoleTemplate(BaseModel):
+    slug: str
+    name: str
+    summary: str  # one-liner shown in the UI
+    kind: RoleKind
+    enabled: bool = True
+    prompt: str = ""  # appended to the orchestrator prompt, or the subagent's prompt
+    model: str | None = None
+    tools: list[str] | None = None  # allowed tools (subagents only)
+    disallowed_tools: list[str] | None = None
+    note: str | None = None  # e.g. "covered by Orchid's permission broker"
+
+
+class PlanStep(BaseModel):
+    id: str
+    title: str
+    status: Literal["pending", "in_progress", "done", "blocked"] = "pending"
+    roles: list[str] = []
+    notes: str | None = None
+
+
+class Plan(BaseModel):
+    id: str
+    title: str
+    goal: str = ""
+    status: Literal["active", "done", "abandoned"] = "active"
+    steps: list[PlanStep] = []
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class Block(BaseModel):

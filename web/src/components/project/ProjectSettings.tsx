@@ -4,6 +4,7 @@ import { api } from "../../api/client";
 import type { PermissionMode, Project, ProjectUpdate } from "../../api/types";
 import { queryClient } from "../../state/queryClient";
 import { useAppStore } from "../../state/stores";
+import { AgentRoles } from "./AgentRoles";
 
 const MODEL_PRESETS = ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"] as const;
 const PERMISSION_MODES: PermissionMode[] = ["acceptEdits", "default", "plan", "bypassPermissions"];
@@ -54,8 +55,9 @@ export function ProjectSettings({ pid }: { pid: string }) {
   };
 
   return (
-    <div className="flex h-full items-center justify-center overflow-y-auto p-8">
-      <div className="fade-up w-full max-w-xl rounded-xl border border-zinc-800 bg-zinc-900/40 p-6 shadow-xl shadow-black/30">
+    <div className="h-full overflow-y-auto p-8">
+      <div className="mx-auto w-full max-w-xl space-y-4">
+      <div className="fade-up rounded-xl border border-zinc-800 bg-zinc-900/40 p-6 shadow-xl shadow-black/30">
         <div className="flex items-baseline gap-2">
           <h2 className="text-base font-medium text-zinc-100">Project settings</h2>
           <span className="min-w-0 truncate text-xs text-zinc-500" title={project?.root}>
@@ -151,6 +153,11 @@ export function ProjectSettings({ pid }: { pid: string }) {
             Close
           </button>
         </div>
+      </div>
+
+      <div className="fade-up rounded-xl border border-zinc-800 bg-zinc-900/40 p-6 shadow-xl shadow-black/30">
+        <AgentRoles pid={pid} />
+      </div>
       </div>
     </div>
   );

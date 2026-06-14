@@ -2,19 +2,37 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { api, ApiError } from "../../api/client";
-import type { AgentInfo, Project, SessionSummary } from "../../api/types";
+import type { AgentInfo, CollabSummary, Project, SessionSummary } from "../../api/types";
 import { queryClient } from "../../state/queryClient";
-import { useAppStore } from "../../state/stores";
+import { isCollabSel, isProjectSel, useAppStore } from "../../state/stores";
 import { AgentDot } from "../session/AgentPanel";
 import { RelativeTime } from "../common/RelativeTime";
 import { StatusDot } from "../common/StatusDot";
+
+const TREE_EXPANDED_KEY = "orchid:tree-expanded";
+
+function loadExpanded(): ReadonlySet<string> {
+  try {
+    const raw = localStorage.getItem(TREE_EXPANDED_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) return new Set(arr.filter((v: unknown) => typeof v === "string"));
+  } catch { /* ignore */ }
+  return new Set();
+}
+
+function saveExpanded(s: ReadonlySet<string>): void {
+  try {
+    localStorage.setItem(TREE_EXPANDED_KEY, JSON.stringify([...s]));
+  } catch { /* ignore */ }
+}
 
 export function ProjectTree() {
   const { data: projects, isPending, isError, refetch } = useQuery({
     queryKey: ["projects"],
     queryFn: api.projects,
   });
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(loadExpanded);
   const select = useAppStore((s) => s.select);
   const focusComposer = useAppStore((s) => s.focusComposer);
 
@@ -23,23 +41,36 @@ export function ProjectTree() {
       const next = new Set(prev);
       if (next.has(pid)) next.delete(pid);
       else next.add(pid);
+      saveExpanded(next);
       return next;
     });
 
+  const selected = useAppStore((s) => s.selected);
+  const isConsole = selected === null;
+
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-center justify-between px-3 pt-3 pb-2">
+      <button
+        type="button"
+        onClick={() => {
+          select(null);
+          focusComposer();
+        }}
+        className={clsx(
+          "mx-2 mt-3 mb-1 flex shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+          isConsole
+            ? "bg-violet-500/10 text-violet-300"
+            : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
+        )}
+      >
+        <span className="text-violet-400/80">⚘</span>
+        Console
+      </button>
+
+      <CollabSection />
+
+      <div className="flex shrink-0 items-center justify-between px-3 pt-2 pb-2">
         <span className="text-[11px] font-medium tracking-wider text-zinc-500 uppercase">Projects</span>
-        <button
-          type="button"
-          onClick={() => {
-            select(null);
-            focusComposer();
-          }}
-          className="rounded-md bg-violet-600 px-2 py-0.5 text-xs font-medium text-white transition-colors hover:bg-violet-500 focus-visible:ring-2 focus-visible:ring-violet-500/60 focus-visible:outline-none"
-        >
-          + New
-        </button>
       </div>
 
       <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-3">
@@ -54,14 +85,148 @@ export function ProjectTree() {
         )}
         {projects?.length === 0 && (
           <div className="px-3 py-10 text-center text-xs leading-relaxed text-zinc-600">
-            No projects yet — onboard one in the chat →
+            No projects yet — onboard one in the console
           </div>
         )}
-        {projects?.map((p) => (
-          <ProjectRow key={p.id} project={p} expanded={expanded.has(p.id)} onToggle={() => toggle(p.id)} />
-        ))}
+        {projects && <ProjectList projects={projects} expanded={expanded} toggle={toggle} />}
       </div>
     </div>
+  );
+}
+
+function CollabSection() {
+  const { data: collabs } = useQuery({
+    queryKey: ["collaborations"],
+    queryFn: api.collaborations,
+    refetchInterval: 30_000,
+  });
+  const select = useAppStore((s) => s.select);
+  const selected = useAppStore((s) => s.selected);
+
+  const active = collabs?.filter((c) => c.state === "active") ?? [];
+  const completed = collabs?.filter((c) => c.state === "completed") ?? [];
+  const hasAny = (collabs?.length ?? 0) > 0;
+
+  if (!hasAny && !collabs) return null;
+
+  return (
+    <>
+      <div className="flex shrink-0 items-center justify-between px-3 pt-2 pb-1">
+        <span className="text-[11px] font-medium tracking-wider text-zinc-500 uppercase">
+          Collaborations
+        </span>
+        <button
+          type="button"
+          title="New collaboration"
+          onClick={() => select({ newCollab: true })}
+          className="rounded p-0.5 text-xs leading-none text-zinc-500 hover:bg-zinc-800 hover:text-violet-300"
+        >
+          +
+        </button>
+      </div>
+      <div className="mb-1 space-y-px px-2">
+        {active.map((c) => (
+          <CollabRow key={c.id} collab={c} isSelected={isCollabSel(selected) && selected.collab === c.id} />
+        ))}
+        {active.length === 0 && !completed.length && (
+          <div className="px-2 py-1 text-[11px] text-zinc-600">No active collaborations</div>
+        )}
+        {completed.length > 0 && (
+          <CompletedCollabs collabs={completed} />
+        )}
+      </div>
+    </>
+  );
+}
+
+function CollabRow({ collab, isSelected }: { collab: CollabSummary; isSelected: boolean }) {
+  const select = useAppStore((s) => s.select);
+  return (
+    <button
+      type="button"
+      onClick={() => select({ collab: collab.id })}
+      className={clsx(
+        "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left select-none",
+        isSelected
+          ? "bg-violet-500/10 text-zinc-100"
+          : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-300",
+      )}
+    >
+      <span className={clsx(
+        "size-1.5 shrink-0 rounded-full",
+        collab.state === "active" ? "bg-emerald-500" : "bg-zinc-600",
+      )} />
+      <span className="truncate text-[13px]">{collab.title}</span>
+      <span className="ml-auto shrink-0 rounded-full bg-zinc-800 px-1.5 py-px text-[10px] tabular-nums text-zinc-400">
+        {collab.message_count}
+      </span>
+    </button>
+  );
+}
+
+function CompletedCollabs({ collabs }: { collabs: CollabSummary[] }) {
+  const [show, setShow] = useState(false);
+  const selected = useAppStore((s) => s.selected);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setShow((v) => !v)}
+        className="w-full rounded px-2 py-1 text-left text-[10px] text-zinc-600 hover:bg-zinc-900 hover:text-zinc-400"
+      >
+        {show ? "hide completed" : `show completed (${collabs.length})`}
+      </button>
+      {show && collabs.map((c) => (
+        <CollabRow key={c.id} collab={c} isSelected={isCollabSel(selected) && selected.collab === c.id} />
+      ))}
+    </>
+  );
+}
+
+function ProjectList({
+  projects,
+  expanded,
+  toggle,
+}: {
+  projects: Project[];
+  expanded: ReadonlySet<string>;
+  toggle: (pid: string) => void;
+}) {
+  const childIds = new Set(projects.flatMap((p) => p.children ?? []));
+  const topLevel = projects.filter((p) => !childIds.has(p.id));
+  const byId = Object.fromEntries(projects.map((p) => [p.id, p]));
+
+  return (
+    <>
+      {topLevel.map((p) => (
+        <div key={p.id}>
+          <ProjectRow
+            project={p}
+            expanded={expanded.has(p.id)}
+            onToggle={() => toggle(p.id)}
+            isMeta={p.project_type === "meta"}
+          />
+          {expanded.has(p.id) && p.project_type === "meta" && (p.children ?? []).length > 0 && (
+            <div className="ml-3 border-l border-zinc-800/60 pl-1">
+              {(p.children ?? []).map((cid) => {
+                const child = byId[cid];
+                if (!child) return null;
+                return (
+                  <ProjectRow
+                    key={cid}
+                    project={child}
+                    expanded={expanded.has(cid)}
+                    onToggle={() => toggle(cid)}
+                    isChild
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ))}
+    </>
   );
 }
 
@@ -69,10 +234,14 @@ function ProjectRow({
   project,
   expanded,
   onToggle,
+  isMeta,
+  isChild,
 }: {
   project: Project;
   expanded: boolean;
   onToggle: () => void;
+  isMeta?: boolean;
+  isChild?: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -85,7 +254,7 @@ function ProjectRow({
       queryClient.setQueryData<Project[]>(["projects"], (old) => old?.filter((p) => p.id !== project.id));
       queryClient.removeQueries({ queryKey: ["sessions", project.id] });
       const { selected, select } = useAppStore.getState();
-      if (selected?.pid === project.id) select(null);
+      if (isProjectSel(selected) && selected.pid === project.id) select(null);
       void queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
   });
@@ -96,33 +265,46 @@ function ProjectRow({
     remove.reset();
   };
 
+  const selected = useAppStore((s) => s.selected);
+  const isDashboard = isProjectSel(selected) && selected.pid === project.id && !selected.sid && !selected.settings && !selected.plans && !selected.reviews && !selected.compose;
+
   return (
     <div>
       <div
-        role="button"
-        tabIndex={0}
-        onClick={onToggle}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            onToggle();
-          }
-        }}
         className={clsx(
           "group relative flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 select-none hover:bg-zinc-900 focus-visible:ring-2 focus-visible:ring-violet-500/40 focus-visible:outline-none",
           project.missing && "opacity-50",
+          isDashboard && "bg-violet-500/10",
         )}
         title={project.root}
       >
-        <span
+        <button
+          type="button"
+          tabIndex={0}
+          aria-label={expanded ? "Collapse" : "Expand"}
+          onClick={onToggle}
           className={clsx(
-            "w-3 shrink-0 text-center text-[10px] text-zinc-600 transition-transform duration-150",
+            "w-3 shrink-0 text-center text-[10px] text-zinc-600 transition-transform duration-150 hover:text-zinc-300",
             expanded && "rotate-90",
           )}
         >
           ▶
+        </button>
+        {isMeta && (
+          <span title="Meta-project" className="shrink-0 text-[10px] text-violet-400/60">◆</span>
+        )}
+        {isChild && (
+          <span title="Child project" className="shrink-0 text-[10px] text-zinc-600">↳</span>
+        )}
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={() => { useAppStore.getState().select({ pid: project.id }); if (!expanded) onToggle(); }}
+          onKeyDown={(e) => { if (e.key === "Enter") { useAppStore.getState().select({ pid: project.id }); if (!expanded) onToggle(); } }}
+          className="truncate text-sm text-zinc-200"
+        >
+          {project.name}
         </span>
-        <span className="truncate text-sm text-zinc-200">{project.name}</span>
         {project.missing && (
           <span title="Project folder is missing" className="shrink-0 text-xs text-amber-400">
             ⚠
@@ -223,6 +405,26 @@ function ProjectRow({
                   >
                     New session
                   </button>
+                  <button
+                    type="button"
+                    className="w-full rounded px-2 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                    onClick={() => {
+                      closeMenu();
+                      useAppStore.getState().select({ pid: project.id, plans: true });
+                    }}
+                  >
+                    Plans
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full rounded px-2 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                    onClick={() => {
+                      closeMenu();
+                      useAppStore.getState().select({ pid: project.id, reviews: true });
+                    }}
+                  >
+                    Reviews
+                  </button>
                   <div className="my-1 h-px bg-zinc-800" />
                   <button
                     type="button"
@@ -292,7 +494,7 @@ function SessionRow({ pid, session }: { pid: string; session: SessionSummary }) 
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
 
-  const isSelected = selected?.pid === pid && selected.sid === session.id;
+  const isSelected = isProjectSel(selected) && selected.pid === pid && selected.sid === session.id;
   const liveStatus = statuses[session.id] ?? session.status;
 
   // Fetch the agent list when expanded (the selected session already streams it
@@ -345,6 +547,11 @@ function SessionRow({ pid, session }: { pid: string; session: SessionSummary }) 
           ▶
         </button>
         <StatusDot status={liveStatus} />
+        {session.role === "orchestrator" && (
+          <span title="Orchestrator" className="shrink-0 text-[9px] text-violet-400/60">
+            ◆
+          </span>
+        )}
         {session.pinned && (
           <span title="Pinned" className="shrink-0 text-[9px] text-violet-400/70">
             ★
@@ -419,7 +626,7 @@ function SessionRow({ pid, session }: { pid: string; session: SessionSummary }) 
 function AgentRow({ pid, sid, agent }: { pid: string; sid: string; agent: AgentInfo }) {
   const select = useAppStore((s) => s.select);
   const selected = useAppStore((s) => s.selected);
-  const isActive = selected?.sid === sid && selected.drillAgentId === agent.agent_id;
+  const isActive = isProjectSel(selected) && selected.sid === sid && selected.drillAgentId === agent.agent_id;
 
   return (
     <button

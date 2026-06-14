@@ -17,6 +17,8 @@ import orchid.claude.driver_manager as dm
 from orchid.bus import EventBus
 from orchid.claude.catalog import Catalog
 from orchid.claude.driver_manager import DriverManager
+from orchid.claude.consult import CONSULT_TOOL_NAMES
+from orchid.claude.planning import PLAN_TOOL_NAMES
 from orchid.claude.transcript import TranscriptCache
 from orchid.services import ApiError, SessionService
 from orchid.store import project_store
@@ -93,13 +95,61 @@ async def wait_for(predicate, timeout=3.0):
 
 async def test_create_session_returns_sid_and_caches(harness):
     h = harness([[[init_msg(), text_msg("made it"), result_msg()]]])
-    sid = await h.manager.create_session(h.entry, "build me a thing")
+    sid = await h.manager.create_orchestrator_session(h.entry, "build me a thing")
     assert sid == SID
     # live messages were cached under the real sid (pending-topic flush worked)
     await wait_for(lambda: h.cache.message_count(SID) == 1)
     assert h.bus.current_seq(f"session:{SID}") >= 2  # turn_started + message (+ completed)
     flags = project_store.get_session_flags(h.root)
     assert flags[SID]["created_by"] == "orchid"
+    await h.manager.aclose()
+
+
+async def test_create_orchestrator_session_wires_roles_and_plan_tools(harness):
+    h = harness([[[init_msg(), text_msg("planning"), result_msg()]]])
+    (h.root / "AGENTS.md").write_text("# Drv\nBuild: uv run pytest")
+    pf = project_store.read_project_file(h.root)
+    pf["intent"], pf["goal"] = "goal", "users can sign up and track vehicles"
+    project_store.write_project_file(h.root, pf)
+    sid = await h.manager.create_orchestrator_session(h.entry, "plan milestones")
+    assert sid == SID
+
+    spec, _client = h.manager._runner.opened[0]
+    assert set(spec.agents) == {"worker", "reviewer", "verifier"}
+    assert spec.permission_mode == "acceptEdits"  # falls back to project setting
+    assert spec.mcp_servers and "orchid_plan" in spec.mcp_servers
+    assert spec.mcp_servers and "orchid_git" in spec.mcp_servers
+    from orchid.claude.git_tools import GIT_TOOL_NAMES
+    assert spec.allowed_tools == PLAN_TOOL_NAMES + GIT_TOOL_NAMES + CONSULT_TOOL_NAMES
+    sp = spec.system_prompt
+    assert sp["type"] == "preset" and sp["preset"] == "claude_code"
+    assert "orchestrator for this project" in sp["append"]
+    assert "uv run pytest" in sp["append"]  # AGENTS.md embedded in the prompt
+    assert "users can sign up and track vehicles" in sp["append"]  # project goal anchors it
+    flags = project_store.get_session_flags(h.root).get(SID, {})
+    assert flags["created_by"] == "orchid" and flags["role"] == "orchestrator"
+    await h.manager.aclose()
+
+
+async def test_read_only_tools_auto_approved(harness):
+    h = harness([])
+    for name in ("Read", "Grep", "Glob", "mcp__orchid_git__git_diff",
+                 "mcp__orchid_elevated__elevated_stat"):
+        result = await h.manager._request_permission(SID, name, {}, None)
+        assert isinstance(result, PermissionResultAllow)
+    # Never entered the broker: no pending request, so no 300s window to burn.
+    assert h.manager.pending_permissions(SID) == []
+
+
+async def test_write_tools_still_gated(harness):
+    h = harness([])
+    task = asyncio.create_task(
+        h.manager._request_permission(SID, "Bash", {"command": "ls"}, None)
+    )
+    await wait_for(lambda: len(h.manager.pending_permissions(SID)) == 1)
+    rid = h.manager.pending_permissions(SID)[0]["request_id"]
+    await h.manager.resolve_permission(rid, "allow")
+    assert isinstance(await task, PermissionResultAllow)
     await h.manager.aclose()
 
 
@@ -112,7 +162,7 @@ async def test_create_session_timeout_504(harness, monkeypatch):
 
     monkeypatch.setattr("orchid.claude.driver.SessionDriver.wait_session_id", fast_wait)
     with pytest.raises(ApiError) as e:
-        await h.manager.create_session(h.entry, "hello?")
+        await h.manager.create_orchestrator_session(h.entry, "hello?")
     assert e.value.status == 504
 
 

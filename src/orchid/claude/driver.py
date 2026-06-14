@@ -39,6 +39,7 @@ class SessionDriver:
         status_cb: Callable[["SessionDriver"], None] | None = None,
         on_burst_start: Callable[[str], None] | None = None,
         on_burst_end: Callable[[str], None] | None = None,
+        on_turn_completed: Callable[[str, dict], None] | None = None,
     ):
         self._runner = runner
         self._spec_factory = spec_factory
@@ -49,6 +50,7 @@ class SessionDriver:
         self._status_cb = status_cb
         self._on_burst_start = on_burst_start
         self._on_burst_end = on_burst_end
+        self._on_turn_completed = on_turn_completed
         self._queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
         self._task: asyncio.Task | None = None
         self._client: RunnerClient | None = None
@@ -197,15 +199,18 @@ class SessionDriver:
                     continue
                 if isinstance(msg, ResultMessage):
                     self._set_session_id(msg.session_id)
-                    self._publish(
-                        "turn_completed",
-                        {
-                            "total_cost_usd": msg.total_cost_usd,
-                            "duration_ms": msg.duration_ms,
-                            "num_turns": msg.num_turns,
-                            "is_error": msg.is_error,
-                        },
-                    )
+                    payload = {
+                        "total_cost_usd": msg.total_cost_usd,
+                        "duration_ms": msg.duration_ms,
+                        "num_turns": msg.num_turns,
+                        "is_error": msg.is_error,
+                    }
+                    self._publish("turn_completed", payload)
+                    if self._on_turn_completed and self.session_id:
+                        try:
+                            self._on_turn_completed(self.session_id, payload)
+                        except Exception:
+                            log.debug("on_turn_completed hook failed", exc_info=True)
                     continue
                 normalized = normalize_stream_message(msg)
                 if normalized is None:

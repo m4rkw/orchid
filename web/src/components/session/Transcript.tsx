@@ -1,9 +1,14 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { NormalizedMessage } from "../../api/types";
+import { messageText } from "../../state/stores";
 import type { PermissionCard as PermissionCardData } from "../../state/stores";
 import { MessageRow, RunningCursor } from "../common/MessageBlock";
 import { PermissionCard } from "./PermissionCard";
+
+function isToolResultOnly(m: NormalizedMessage): boolean {
+  return m.role === "user" && m.blocks.every((b) => b.type === "tool_result") && !messageText(m);
+}
 
 /**
  * Virtualized session transcript with stick-to-bottom. Permission cards, the
@@ -17,8 +22,10 @@ export function Transcript({
   lastError,
   permissions,
   loading,
+  verbose,
   onShowFull,
   onDismissError,
+  onAllowAll,
 }: {
   sid: string;
   messages: NormalizedMessage[];
@@ -27,18 +34,25 @@ export function Transcript({
   permissions: PermissionCardData[];
   /** Backlog request still in flight and nothing cached yet. */
   loading: boolean;
+  verbose: boolean;
   onShowFull: (uuid: string) => Promise<void>;
   onDismissError: () => void;
+  onAllowAll: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
 
+  const shown = useMemo(
+    () => (verbose ? messages : messages.filter((m) => !isToolResultOnly(m))),
+    [messages, verbose],
+  );
+
   const virtualizer = useVirtualizer({
-    count: messages.length,
+    count: shown.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 72,
     overscan: 8,
-    getItemKey: (i) => messages[i].uuid,
+    getItemKey: (i) => shown[i].uuid,
   });
   const totalSize = virtualizer.getTotalSize();
 
@@ -54,7 +68,7 @@ export function Transcript({
     if (!stickToBottom.current) return;
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages.length, totalSize, running, lastError, permissions.length]);
+  }, [shown.length, totalSize, running, lastError, permissions.length]);
 
   // New session selected in the same mounted view: snap back to the tail.
   useEffect(() => {
@@ -75,7 +89,7 @@ export function Transcript({
       ) : (
         <div className="relative mx-0 mt-4" style={{ height: totalSize }}>
           {items.map((vi) => {
-            const message = messages[vi.index];
+            const message = shown[vi.index];
             return (
               <div
                 key={vi.key}
@@ -98,6 +112,15 @@ export function Transcript({
           {permissions.map((card) => (
             <PermissionCard key={card.request_id} sid={sid} card={card} />
           ))}
+          {permissions.some((p) => !p.expired) && (
+            <button
+              type="button"
+              onClick={onAllowAll}
+              className="self-start rounded-lg border border-violet-500/40 bg-violet-600/15 px-3 py-1 text-xs font-medium text-violet-200 transition-colors hover:bg-violet-600/30"
+            >
+              Allow all for this turn
+            </button>
+          )}
           {lastError && (
             <div className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
               <span className="shrink-0 font-medium">Error:</span>

@@ -35,6 +35,11 @@ def init_project(root: Path, project_id: str, name: str) -> dict:
         "name": name,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "settings": {"model": None, "permission_mode": "acceptEdits"},
+        "intent": None,
+        "goal": None,
+        "review_mode": None,
+        "project_type": None,
+        "children": [],
     }
     atomic_write_json(_project_file(root), data)
     return data
@@ -55,6 +60,16 @@ def get_session_flags(root: Path) -> dict[str, dict[str, Any]]:
         return {}
     sessions = data.get("sessions")
     return sessions if isinstance(sessions, dict) else {}
+
+
+def is_orchid_session(root: Path, session_id: str) -> bool:
+    """True only for sessions Orchid itself created (orchestrator session / fork).
+
+    Orchid never adopts terminal-started transcripts that merely happen to live
+    in the same directory, so the ``created_by`` flag is the single source of
+    truth for what Orchid is allowed to surface and stream.
+    """
+    return get_session_flags(root).get(session_id, {}).get("created_by") == "orchid"
 
 
 def set_session_flags(root: Path, session_id: str, **flags: Any) -> dict[str, Any]:

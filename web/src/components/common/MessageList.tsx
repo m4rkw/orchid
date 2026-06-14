@@ -11,7 +11,7 @@ export function MessageList({
   onShowFull,
 }: {
   messages: NormalizedMessage[];
-  /** Append the pulsing "Claude is working" caret. */
+  /** Append the "Orchid is working" indicator. */
   running?: boolean;
   /** Per-message fetch of the untruncated version; enables "show full" affordances. */
   onShowFull?: (uuid: string) => Promise<void> | void;

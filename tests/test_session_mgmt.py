@@ -107,11 +107,13 @@ async def test_delete_refused_when_external(harness):
 
 
 async def test_fork_returns_new_sid(harness):
-    service, bus, state, _root = harness
+    service, bus, state, root = harness
     sub = bus.subscribe()
     new_sid = await service.fork(SID, title="branch")
     assert new_sid == "fork-new"
     assert state["forked_from"] == SID
+    # A fork is Orchid-created, so it must be owned — otherwise it'd be filtered out.
+    assert project_store.get_session_flags(root)["fork-new"]["created_by"] == "orchid"
     upserts = [e for _ in range(sub.queue.qsize()) if (e := sub.queue.get_nowait())["type"] == "session_upserted"]
     assert any(u["payload"]["session"]["id"] == "fork-new" for u in upserts)
 

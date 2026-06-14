@@ -147,7 +147,14 @@ def normalize_record(rec: Any, cap: int = PREVIEW_CAP, agent_id: str | None = No
     message = rec.message
     if not isinstance(message, dict):
         return None
-    blocks = _blocks_from_raw_content(message.get("content"), cap)
+    content = message.get("content")
+    if isinstance(content, list) and len(content) == 1:
+        only = content[0]
+        if isinstance(only, dict) and only.get("type") == "text":
+            text = only.get("text", "")
+            if text.startswith("[Request interrupted"):
+                return None
+    blocks = _blocks_from_raw_content(content, cap)
     if not blocks:
         return None
     return NormalizedMessage(
@@ -177,13 +184,22 @@ class TranscriptCache:
         return len(self._messages.get(session_id, []))
 
     def ingest(self, session_id: str, normalized: list[NormalizedMessage]) -> list[NormalizedMessage]:
-        """Merge a full re-read; returns only the messages not seen before."""
+        """Merge a full re-read; returns only the messages not seen before.
+
+        Disk order is authoritative — if live-streamed messages arrived before
+        the disk read, the list is rebuilt in JSONL order so responses never
+        appear before the prompts that triggered them.
+        """
         seen = self._seen.setdefault(session_id, set())
         messages = self._messages.setdefault(session_id, [])
         fresh = [m for m in normalized if m.uuid not in seen]
-        for m in fresh:
+        for m in normalized:
             seen.add(m.uuid)
-            messages.append(m)
+        disk_uuids = {m.uuid for m in normalized}
+        live_only = [m for m in messages if m.uuid not in disk_uuids]
+        messages.clear()
+        messages.extend(normalized)
+        messages.extend(live_only)
         if len(messages) > self._max:
             del messages[: len(messages) - self._max]
         return fresh

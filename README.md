@@ -5,6 +5,11 @@ pointing a Claude-powered chat at its directory, watch projects → sessions →
 live in a tree, drive any session from the browser, and jump into any session from a
 terminal with `claude --resume`.
 
+## Warning
+
+THIS PROJECT IS HIGHLY EXPERIMENTAL, NOT WELL TESTED AND ENTIRELY VIBE-CODED.
+USE AT YOUR OWN RISK.
+
 ## Run
 
 ```sh

@@ -7,10 +7,11 @@ import { MessageList } from "../common/MessageList";
 
 const MAX_COMPOSER_HEIGHT_PX = 144; // ~6 lines at 24px line-height
 
-export function OnboardingChat() {
+export function ConsoleChat() {
   const messages = useAppStore((s) => s.onboarding.messages);
   const running = useAppStore((s) => s.onboarding.running);
   const lastError = useAppStore((s) => s.onboarding.lastError);
+  const choices = useAppStore((s) => s.onboarding.choices);
   const composerFocusKey = useAppStore((s) => s.composerFocusKey);
   const appendOnboardingUser = useAppStore((s) => s.appendOnboardingUser);
   const setOnboardingError = useAppStore((s) => s.setOnboardingError);
@@ -75,16 +76,21 @@ export function OnboardingChat() {
     if (!blocked) textareaRef.current?.focus();
   }, [blocked]);
 
-  const send = async () => {
-    const text = value.trim();
+  const sendText = async (raw: string) => {
+    const text = raw.trim();
     if (!text || blocked || !wsOpen) return;
-    setValue("");
-    appendOnboardingUser(text); // optimistic; also flips running on
+    appendOnboardingUser(text); // optimistic; flips running on and clears pending choices
     try {
       await api.onboardingPrompt(text);
     } catch (err) {
       setOnboardingError(err instanceof Error ? err.message : "Failed to send prompt");
     }
+  };
+
+  const send = async () => {
+    if (!value.trim()) return;
+    setValue("");
+    await sendText(value);
   };
 
   const reset = async () => {
@@ -103,8 +109,8 @@ export function OnboardingChat() {
     <div className="flex h-full flex-col">
       <div className="flex h-11 shrink-0 items-center justify-between border-b border-zinc-800 px-4">
         <div className="flex items-baseline gap-2">
-          <h1 className="text-sm font-medium text-zinc-200">Onboarding</h1>
-          <span className="text-[11px] text-zinc-600">register projects by chatting with Claude</span>
+          <h1 className="text-sm font-medium text-zinc-200">Console</h1>
+          <span className="text-[11px] text-zinc-600">manage Orchid and your projects</span>
         </div>
         <button
           type="button"
@@ -121,6 +127,27 @@ export function OnboardingChat() {
       </div>
 
       <div className="shrink-0 border-t border-zinc-800 p-4 pt-3">
+        {choices.map((choice) => (
+          <div
+            key={choice.id}
+            className="mx-auto mb-2 max-w-3xl rounded-xl border border-violet-500/30 bg-violet-500/5 px-3 py-2.5"
+          >
+            <div className="text-xs text-zinc-300">{choice.question}</div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {choice.options.map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  disabled={blocked || !wsOpen}
+                  onClick={() => void sendText(opt)}
+                  className="rounded-lg border border-violet-500/40 bg-violet-600/15 px-3 py-1 text-xs font-medium text-violet-200 transition-colors hover:bg-violet-600/30 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
         {lastError && (
           <div className="mx-auto mb-2 flex max-w-3xl items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
             <span className="shrink-0 font-medium">Error:</span>
@@ -147,7 +174,7 @@ export function OnboardingChat() {
             rows={1}
             value={value}
             disabled={blocked || !wsOpen}
-            placeholder={blocked || !wsOpen ? "" : "Ask Claude to onboard a project…"}
+            placeholder={blocked || !wsOpen ? "" : "Onboard a project, manage settings, ask anything…"}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -155,7 +182,7 @@ export function OnboardingChat() {
                 void send();
               }
             }}
-            className="max-h-36 min-h-6 w-full resize-none bg-transparent text-sm leading-6 text-zinc-100 outline-none placeholder:text-zinc-600 disabled:opacity-50"
+            className="max-h-36 min-h-6 w-full resize-none bg-transparent text-base leading-6 text-zinc-100 outline-none placeholder:text-zinc-600 disabled:opacity-50 md:text-sm"
           />
           {!wsOpen ? (
             <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-amber-300/80">
@@ -164,7 +191,7 @@ export function OnboardingChat() {
           ) : (
             blocked && (
               <div className="pointer-events-none absolute inset-y-0 left-3 flex animate-pulse items-center text-sm text-violet-300/80">
-                Claude is working…
+                Orchid is working…
               </div>
             )
           )}
@@ -187,14 +214,12 @@ export function OnboardingChat() {
 
 function EmptyHero() {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 px-8 text-center">
+    <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
       <div className="text-4xl text-violet-400/80">⚘</div>
-      <div className="font-medium text-zinc-300">Onboard a project</div>
-      <p className="max-w-sm text-sm leading-relaxed text-zinc-500">
-        Ask Claude to register a folder as a project — try{" "}
-        <span className="rounded bg-zinc-800/70 px-1.5 py-0.5 font-mono text-xs text-zinc-300">
-          onboard ~/code/my-app
-        </span>
+      <div className="font-medium text-zinc-300">Orchid Console</div>
+      <p className="max-w-md text-sm leading-relaxed text-zinc-500">
+        Onboard projects, manage agent roles, check on running sessions, or ask about anything
+        across your projects.
       </p>
     </div>
   );

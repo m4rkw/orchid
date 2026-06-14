@@ -1,18 +1,33 @@
 import { create } from "zustand";
 import type {
   AgentInfo,
+  ChoicePrompt,
+  CollabMessage,
   NormalizedMessage,
   PermissionRequest,
+  Plan,
   Project,
   SessionStatus,
   SessionSummary,
   WsEvent,
 } from "../api/types";
+import { api } from "../api/client";
 import { queryClient } from "./queryClient";
 
-export type Selection =
-  | { pid: string; sid?: string; compose?: boolean; settings?: boolean; drillAgentId?: string }
-  | null;
+export type ProjectSelection = { pid: string; sid?: string; compose?: boolean; settings?: boolean; plans?: boolean; reviews?: boolean; reviewId?: string; drillAgentId?: string };
+export type CollabSelection = { collab: string };
+export type NewCollabSelection = { newCollab: true };
+export type Selection = ProjectSelection | CollabSelection | NewCollabSelection | null;
+
+export function isProjectSel(s: Selection): s is ProjectSelection {
+  return s !== null && "pid" in s;
+}
+export function isCollabSel(s: Selection): s is CollabSelection {
+  return s !== null && "collab" in s;
+}
+export function isNewCollabSel(s: Selection): s is NewCollabSelection {
+  return s !== null && "newCollab" in s;
+}
 
 /** Concatenated text-block content of a message ("" if it has none). */
 export function messageText(message: NormalizedMessage): string {
@@ -91,20 +106,31 @@ const MAX_PENDING_EVENTS = 1000;
  */
 const fullMessageCache = new Map<string, NormalizedMessage>();
 
+export type CollabBuffer = {
+  messages: CollabMessage[];
+  responding: boolean;
+  respondingLabel: string | null;
+};
+
 type AppState = {
   selected: Selection;
   onboarding: {
     messages: NormalizedMessage[];
     running: boolean;
     lastError: string | null;
+    /** Pending fixed-answer questions from the console agent (`choice_prompt` events). */
+    choices: ChoicePrompt[];
   };
   sessionStatuses: Record<string, SessionStatus>;
   queueLens: Record<string, number>;
   sessionBuffers: Record<string, SessionBuffer>;
   agents: Record<string, AgentInfo[]>;
   permissions: Record<string, PermissionCard[]>;
+  /** Sessions where all permission requests are auto-approved until the turn ends. */
+  autoApprove: Record<string, boolean>;
   /** Bumped to ask the onboarding composer to grab focus. */
   composerFocusKey: number;
+  collabBuffers: Record<string, CollabBuffer>;
 
   select: (selected: Selection) => void;
   focusComposer: () => void;
@@ -129,8 +155,13 @@ type AppState = {
   setAgents: (sid: string, agents: AgentInfo[]) => void;
   /** Drop a session from the sidebar cache + project badge; clears selection if selected. */
   removeSession: (pid: string, sid: string) => void;
+  seedPermissions: (sid: string, cards: PermissionCard[]) => void;
   resolvePermission: (sid: string, requestId: string) => void;
   expirePermission: (sid: string, requestId: string) => void;
+  setAutoApprove: (sid: string, value: boolean) => void;
+
+  ensureCollab: (cid: string) => void;
+  seedCollab: (cid: string, messages: CollabMessage[]) => void;
 
   /** Single reducer for every WsEvent coming off the socket. */
   apply: (event: WsEvent) => void;
@@ -202,17 +233,39 @@ function upsertAgent(list: AgentInfo[] | undefined, agentId: string, patch: Part
   return next;
 }
 
+function loadSelection(): Selection {
+  try {
+    const raw = localStorage.getItem("orchid:selection");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && typeof parsed.pid === "string") return parsed as Selection;
+  } catch { /* ignore */ }
+  return null;
+}
+
+function saveSelection(sel: Selection): void {
+  try {
+    if (sel) localStorage.setItem("orchid:selection", JSON.stringify(sel));
+    else localStorage.removeItem("orchid:selection");
+  } catch { /* ignore */ }
+}
+
 export const useAppStore = create<AppState>()((set, get) => ({
-  selected: null,
-  onboarding: { messages: [], running: false, lastError: null },
+  selected: loadSelection(),
+  onboarding: { messages: [], running: false, lastError: null, choices: [] },
   sessionStatuses: {},
   queueLens: {},
   sessionBuffers: {},
   agents: {},
   permissions: {},
+  autoApprove: {},
   composerFocusKey: 0,
+  collabBuffers: {},
 
-  select: (selected) => set({ selected }),
+  select: (selected) => {
+    saveSelection(selected);
+    set({ selected });
+  },
 
   focusComposer: () => set((s) => ({ composerFocusKey: s.composerFocusKey + 1 })),
 
@@ -222,6 +275,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         ...s.onboarding,
         running: true, // optimistic; confirmed by turn_started
         lastError: null,
+        choices: [], // any pending quick-reply is now answered/superseded by this prompt
         messages: [
           ...s.onboarding.messages,
           { uuid: localUuid(), role: "user", agent_id: null, blocks: [{ type: "text", text }] },
@@ -240,9 +294,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
     })),
 
   loadOnboarding: (messages, running) =>
-    set((s) => ({ onboarding: { ...s.onboarding, messages, running, lastError: null } })),
+    set((s) => ({ onboarding: { ...s.onboarding, messages, running, lastError: null, choices: [] } })),
 
-  resetOnboarding: () => set({ onboarding: { messages: [], running: false, lastError: null } }),
+  resetOnboarding: () =>
+    set({ onboarding: { messages: [], running: false, lastError: null, choices: [] } }),
 
   ensureSession: (sid) =>
     set((s) => (s.sessionBuffers[sid] ? s : { sessionBuffers: { ...s.sessionBuffers, [sid]: emptyBuffer() } })),
@@ -251,15 +306,27 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set((s) => {
       const prev = s.sessionBuffers[sid] ?? emptyBuffer();
       // A stale snapshot (older than what we've already applied live) is ignored.
-      if (prev.seeded && seq < prev.seq) return s;
+      // seq === 0 means the server restarted (bus reset) — always accept it.
+      if (prev.seeded && seq > 0 && seq < prev.seq) return s;
       const canonical = messages.map((m) => fullMessageCache.get(m.uuid) ?? m);
       const seen: Record<string, true> = {};
       for (const m of canonical) seen[m.uuid] = true;
+      // Carry forward optimistic (local-uuid) messages not yet echoed by the server.
+      // Drop any whose text already appears in a canonical user message (server echo).
+      const kept = prev.messages.filter((m) => {
+        if (!isLocalUuid(m.uuid) || seen[m.uuid]) return false;
+        if (m.role === "user") {
+          const text = messageText(m);
+          if (text && canonical.some((c) => c.role === "user" && messageText(c) === text)) return false;
+        }
+        return true;
+      });
+      for (const m of kept) seen[m.uuid] = true;
       let buf: SessionBuffer = {
         ...prev,
         seeded: true,
         seq,
-        messages: canonical,
+        messages: [...canonical, ...kept],
         seen,
         pending: [],
       };
@@ -360,11 +427,22 @@ export const useAppStore = create<AppState>()((set, get) => ({
       delete agents[sid];
       const permissions = { ...s.permissions };
       delete permissions[sid];
-      const selected =
-        s.selected?.pid === pid && s.selected.sid === sid ? null : s.selected;
+      const sel = s.selected;
+      const isMatch = isProjectSel(sel) && sel.pid === pid && sel.sid === sid;
+      const selected = isMatch ? null : s.selected;
+      if (isMatch) saveSelection(null);
       return { sessionBuffers, sessionStatuses, queueLens, agents, permissions, selected };
     });
   },
+
+  seedPermissions: (sid, cards) =>
+    set((s) => {
+      const existing = s.permissions[sid] ?? [];
+      const seen = new Set(existing.map((p) => p.request_id));
+      const fresh = cards.filter((c) => !seen.has(c.request_id));
+      if (!fresh.length) return s;
+      return { permissions: { ...s.permissions, [sid]: [...existing, ...fresh] } };
+    }),
 
   resolvePermission: (sid, requestId) =>
     set((s) => ({
@@ -379,6 +457,24 @@ export const useAppStore = create<AppState>()((set, get) => ({
       permissions: {
         ...s.permissions,
         [sid]: (s.permissions[sid] ?? []).map((p) => (p.request_id === requestId ? { ...p, expired: true } : p)),
+      },
+    })),
+
+  setAutoApprove: (sid, value) =>
+    set((s) => ({ autoApprove: { ...s.autoApprove, [sid]: value } })),
+
+  ensureCollab: (cid) =>
+    set((s) =>
+      s.collabBuffers[cid]
+        ? s
+        : { collabBuffers: { ...s.collabBuffers, [cid]: { messages: [], responding: false, respondingLabel: null } } },
+    ),
+
+  seedCollab: (cid, messages) =>
+    set((s) => ({
+      collabBuffers: {
+        ...s.collabBuffers,
+        [cid]: { ...(s.collabBuffers[cid] ?? { responding: false, respondingLabel: null }), messages },
       },
     })),
 
@@ -406,7 +502,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
           const pid = payload.project_id as string;
           queryClient.setQueryData<Project[]>(["projects"], (old) => old?.filter((p) => p.id !== pid));
           queryClient.removeQueries({ queryKey: ["sessions", pid] });
-          if (get().selected?.pid === pid) set({ selected: null });
+          { const sel = get().selected; if (isProjectSel(sel) && sel.pid === pid) { saveSelection(null); set({ selected: null }); } }
           break;
         }
         case "session_upserted": {
@@ -439,6 +535,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
           set((s) => ({
             sessionStatuses: { ...s.sessionStatuses, [sid]: status },
             queueLens: { ...s.queueLens, [sid]: queueLen },
+            ...(status === "idle" && s.autoApprove[sid]
+              ? { autoApprove: { ...s.autoApprove, [sid]: false } }
+              : {}),
           }));
           break;
         }
@@ -462,6 +561,34 @@ export const useAppStore = create<AppState>()((set, get) => ({
           } else {
             void queryClient.invalidateQueries({ queryKey: ["projects"] });
           }
+          break;
+        }
+        case "plan_upserted": {
+          const pid = payload.project_id as string;
+          const plan = payload.plan as Plan;
+          if (!plan || typeof plan.id !== "string") break;
+          const cached = queryClient.getQueryData<Plan[]>(["plans", pid]);
+          if (cached) {
+            const idx = cached.findIndex((p) => p.id === plan.id);
+            queryClient.setQueryData<Plan[]>(
+              ["plans", pid],
+              idx === -1 ? [plan, ...cached] : cached.map((p) => (p.id === plan.id ? plan : p)),
+            );
+          } else {
+            void queryClient.invalidateQueries({ queryKey: ["plans", pid] });
+          }
+          break;
+        }
+        case "review_requested":
+        case "review_updated": {
+          const pid = payload.project_id as string;
+          void queryClient.invalidateQueries({ queryKey: ["reviews", pid] });
+          void queryClient.invalidateQueries({ queryKey: ["activity", pid] });
+          break;
+        }
+        case "usage_updated": {
+          const pid = payload.project_id as string;
+          void queryClient.invalidateQueries({ queryKey: ["usage", pid] });
           break;
         }
       }
@@ -543,6 +670,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
         case "permission_request": {
           const card = payload as unknown as PermissionRequest;
           if (typeof card.request_id !== "string") break;
+          if (get().autoApprove[sid]) {
+            void api.respondPermission(card.request_id, "allow").catch(() => {});
+            break;
+          }
           set((s) => {
             const cards = s.permissions[sid] ?? [];
             if (cards.some((p) => p.request_id === card.request_id)) return s;
@@ -552,6 +683,71 @@ export const useAppStore = create<AppState>()((set, get) => ({
         }
       }
       return;
+    }
+
+    if (topic.startsWith("collab:")) {
+      const cid = topic.slice("collab:".length);
+      const buf = get().collabBuffers[cid];
+      if (!buf) return;
+      switch (type) {
+        case "collab_message": {
+          const msg = payload.message as CollabMessage;
+          if (!msg || typeof msg.id !== "string") break;
+          if (buf.messages.some((m) => m.id === msg.id)) break;
+          set((s) => ({
+            collabBuffers: {
+              ...s.collabBuffers,
+              [cid]: { ...buf, messages: [...buf.messages, msg] },
+            },
+          }));
+          break;
+        }
+        case "collab_turn_started": {
+          const label = typeof payload.label === "string" ? payload.label : null;
+          set((s) => ({
+            collabBuffers: {
+              ...s.collabBuffers,
+              [cid]: { ...buf, responding: true, respondingLabel: label },
+            },
+          }));
+          break;
+        }
+        case "collab_turn_completed":
+          set((s) => ({
+            collabBuffers: {
+              ...s.collabBuffers,
+              [cid]: { ...buf, responding: false, respondingLabel: null },
+            },
+          }));
+          break;
+        case "collab_ended":
+          set((s) => ({
+            collabBuffers: {
+              ...s.collabBuffers,
+              [cid]: { ...buf, responding: false, respondingLabel: null },
+            },
+          }));
+          void queryClient.invalidateQueries({ queryKey: ["collaborations"] });
+          void queryClient.invalidateQueries({ queryKey: ["collab", cid] });
+          break;
+        case "collab_error": {
+          set((s) => ({
+            collabBuffers: {
+              ...s.collabBuffers,
+              [cid]: { ...buf, responding: false, respondingLabel: null },
+            },
+          }));
+          break;
+        }
+      }
+      return;
+    }
+
+    if (topic === "sidebar") {
+      // Handle collab sidebar events before the main sidebar switch
+      if (type === "collab_updated" || type === "collab_removed") {
+        void queryClient.invalidateQueries({ queryKey: ["collaborations"] });
+      }
     }
 
     if (topic === "onboarding") {
@@ -598,6 +794,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
           set((s) => ({
             onboarding: { ...s.onboarding, running: false, messages: [...s.onboarding.messages, divider] },
           }));
+          break;
+        }
+        case "choice_prompt": {
+          const choice = payload as unknown as ChoicePrompt;
+          if (typeof choice.id !== "string" || !Array.isArray(choice.options)) break;
+          set((s) => {
+            if (s.onboarding.choices.some((c) => c.id === choice.id)) return s; // replay
+            return { onboarding: { ...s.onboarding, choices: [...s.onboarding.choices, choice] } };
+          });
           break;
         }
         case "project_registered":

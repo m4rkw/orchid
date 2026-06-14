@@ -3,11 +3,12 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .bus import EventBus
+from .claude import roles as roles_mod
 from .claude.catalog import Catalog, map_summary
 from .claude.transcript import TranscriptCache, normalize_record
 from .config import Settings
-from .models import AgentInfo, NormalizedMessage, Project, SessionDetail, SessionSummary
-from .store import project_store
+from .models import AgentInfo, NormalizedMessage, Project, RoleTemplate, SessionDetail, SessionSummary
+from .store import agents_store, project_store, usage_store
 from .store.paths import canonicalize, handoff_command
 from .store.registry import Registry, new_project_id
 
@@ -74,7 +75,11 @@ class ProjectService:
         return entry
 
     async def update(self, project_id: str, name: str | None = None,
-                     settings: dict[str, Any] | None = None) -> Project:
+                     settings: dict[str, Any] | None = None,
+                     intent: str | None = ..., goal: str | None = ...,
+                     review_mode: str | None = ...,
+                     project_type: str | None = ...,
+                     children: list[str] | None = ...) -> Project:
         entry = self.get_entry(project_id)
         root = Path(entry["root"])
         file = project_store.read_project_file(root)
@@ -84,6 +89,16 @@ class ProjectService:
             file["name"] = name
         if settings:
             file.setdefault("settings", {}).update(settings)
+        if intent is not ...:
+            file["intent"] = intent
+        if goal is not ...:
+            file["goal"] = goal
+        if review_mode is not ...:
+            file["review_mode"] = review_mode
+        if project_type is not ...:
+            file["project_type"] = project_type
+        if children is not ...:
+            file["children"] = children if children is not None else []
         project_store.write_project_file(root, file)
         project = await self._to_project(entry)
         self._bus.publish("sidebar", "project_updated", {"project": project.model_dump()})
@@ -98,8 +113,7 @@ class ProjectService:
 
     async def sessions(self, project_id: str) -> list[SessionSummary]:
         root = Path(self.get_entry(project_id)["root"])
-        flags = project_store.get_session_flags(root)
-        summaries = await self._catalog.list_sessions(root, flags)
+        summaries = await self._owned_sessions(root)
         for s in summaries:
             if self.is_running and self.is_running(s.id):
                 s.status = "running"
@@ -109,17 +123,57 @@ class ProjectService:
         summaries.sort(key=lambda s: not s.pinned)
         return summaries
 
+    async def _owned_sessions(self, root: Path) -> list[SessionSummary]:
+        """Sessions Orchid created — the only ones it surfaces. Terminal-started
+        transcripts in the same directory are catalogued by the SDK too, but
+        Orchid never lists or drives them (one terminal == one writer)."""
+        flags = project_store.get_session_flags(root)
+        summaries = await self._catalog.list_sessions(root, flags)
+        return [s for s in summaries if s.created_by == "orchid"]
+
+    def roles(self, project_id: str) -> list[RoleTemplate]:
+        """The project's agent roles: built-in templates merged with its overrides."""
+        root = Path(self.get_entry(project_id)["root"])
+        return roles_mod.resolve_roles(root)
+
+    def child_roots(self, project_id: str) -> list[Path]:
+        """Resolve the root paths of a meta-project's children (skips missing)."""
+        entry = self.get_entry(project_id)
+        root = Path(entry["root"])
+        file = project_store.read_project_file(root)
+        if not file or not file.get("children"):
+            return []
+        roots = []
+        for cid in file["children"]:
+            child = self._registry.find(cid)
+            if child:
+                p = Path(child["root"])
+                if p.is_dir():
+                    roots.append(p)
+        return roots
+
+    def set_roles(self, project_id: str, payload: list[dict[str, Any]]) -> list[RoleTemplate]:
+        root = Path(self.get_entry(project_id)["root"])
+        agents_store.write_agent_overrides(root, roles_mod.normalize_overrides(payload))
+        return roles_mod.resolve_roles(root)
+
     async def _to_project(self, entry: dict) -> Project:
         root = Path(entry["root"])
         file = project_store.read_project_file(root) if root.exists() else None
         missing = file is None
-        count = 0 if missing else len(await self._catalog.list_sessions(root, {}))
+        count = 0 if missing else len(await self._owned_sessions(root))
+        f = file or {}
         return Project(
             id=entry["id"],
-            name=(file or {}).get("name", root.name),
+            name=f.get("name", root.name),
             root=str(root),
             session_count=count,
             missing=missing,
+            intent=f.get("intent"),
+            goal=f.get("goal"),
+            review_mode=f.get("review_mode"),
+            project_type=f.get("project_type"),
+            children=f.get("children") or [],
         )
 
 
@@ -183,10 +237,13 @@ class SessionService:
         entry, info = await self.locate(session_id)
         root = Path(entry["root"])
         summary = self._summary(session_id, info, root)
+        usage = usage_store.read_usage(root, session_id)
         return SessionDetail(
             **summary.model_dump(),
             project_id=entry["id"],
             handoff_command=handoff_command(root, session_id),
+            cost_usd=usage.get("total_cost_usd"),
+            turns=usage.get("turns") or 0,
         )
 
     async def _load_cache(self, session_id: str, root: Path) -> None:
@@ -256,6 +313,9 @@ class SessionService:
         entry, _info = await self.locate(session_id)
         root = Path(entry["root"])
         new_sid = await self._catalog.fork(session_id, root, title=title)
+        # A fork born inside Orchid is Orchid-owned, like a created session — without
+        # this flag the new session would be filtered out of every listing.
+        project_store.set_session_flags(root, new_sid, created_by="orchid")
         await self._emit_upsert(new_sid, entry["id"], root)
         return new_sid
 

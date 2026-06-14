@@ -3,7 +3,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { api, ApiError } from "../../api/client";
 import type { SessionDetail } from "../../api/types";
-import { isLocalUuid, useAppStore } from "../../state/stores";
+import { isLocalUuid, isProjectSel, useAppStore } from "../../state/stores";
+import { queryClient } from "../../state/queryClient";
 import { socket } from "../../ws/socket";
 import { CopyButton } from "../common/CopyButton";
 import { StatusDot } from "../common/StatusDot";
@@ -17,13 +18,14 @@ export function SessionView({ pid, sid }: { pid: string; sid: string }) {
   const seedSession = useAppStore((s) => s.seedSession);
   const clearSessionLive = useAppStore((s) => s.clearSessionLive);
   const setAgents = useAppStore((s) => s.setAgents);
+  const seedPermissions = useAppStore((s) => s.seedPermissions);
   const setSessionError = useAppStore((s) => s.setSessionError);
   const buffer = useAppStore((s) => s.sessionBuffers[sid]);
   const statusOverride = useAppStore((s) => s.sessionStatuses[sid]);
   const queueLen = useAppStore((s) => s.queueLens[sid] ?? 0);
   const agents = useAppStore((s) => s.agents[sid]);
   const permissions = useAppStore((s) => s.permissions[sid]);
-  const selectedDrillAgentId = useAppStore((s) => (s.selected?.sid === sid ? s.selected.drillAgentId : undefined));
+  const selectedDrillAgentId = useAppStore((s) => (isProjectSel(s.selected) && s.selected.sid === sid ? s.selected.drillAgentId : undefined));
 
   // Track the live topic for the lifetime of the selection.
   useEffect(() => {
@@ -32,6 +34,7 @@ export function SessionView({ pid, sid }: { pid: string; sid: string }) {
     return () => {
       socket.unsubscribe(`session:${sid}`);
       clearSessionLive(sid);
+      queryClient.removeQueries({ queryKey: ["session-messages", sid] });
     };
   }, [sid, ensureSession, clearSessionLive]);
 
@@ -64,6 +67,18 @@ export function SessionView({ pid, sid }: { pid: string; sid: string }) {
     if (agentsQuery.data) setAgents(sid, agentsQuery.data);
   }, [agentsQuery.data, agentsQuery.dataUpdatedAt, sid, setAgents]);
 
+  const permsQuery = useQuery({
+    queryKey: ["session-permissions", sid],
+    queryFn: () => api.sessionPermissions(sid),
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
+  useEffect(() => {
+    if (permsQuery.data?.length) {
+      seedPermissions(sid, permsQuery.data.map((p) => ({ ...p, expired: false })));
+    }
+  }, [permsQuery.data, permsQuery.dataUpdatedAt, sid, seedPermissions]);
+
   const projects = useQuery({ queryKey: ["projects"], queryFn: api.projects });
   const project = projects.data?.find((p) => p.id === (detail.data?.project_id ?? pid));
 
@@ -75,6 +90,7 @@ export function SessionView({ pid, sid }: { pid: string; sid: string }) {
   const title = detail.data?.title || `${sid.slice(0, 8)}…`;
 
   const [agentsOpen, setAgentsOpen] = useState(true);
+  const [verbose, setVerbose] = useState(false);
   const [drillAgentId, setDrillAgentId] = useState<string | null>(null);
   const drillAgent = drillAgentId === null ? null : (agents ?? []).find((a) => a.agent_id === drillAgentId) ?? null;
   useEffect(() => setDrillAgentId(null), [sid]);
@@ -86,7 +102,7 @@ export function SessionView({ pid, sid }: { pid: string; sid: string }) {
     setDrillAgentId(null);
     const { selected, select } = useAppStore.getState();
     // Clear the selection's drill marker so re-clicking the same agent re-opens.
-    if (selected?.sid === sid && selected.drillAgentId) {
+    if (isProjectSel(selected) && selected.sid === sid && selected.drillAgentId) {
       select({ ...selected, drillAgentId: undefined });
     }
   };
@@ -100,6 +116,18 @@ export function SessionView({ pid, sid }: { pid: string; sid: string }) {
       if (err instanceof ApiError && err.status === 409) return; // nothing to interrupt
       setInterruptError(err instanceof Error ? err.message : "Failed to interrupt");
     }
+  };
+
+  const allowAll = () => {
+    const store = useAppStore.getState();
+    const cards = permissions ?? [];
+    for (const card of cards) {
+      if (!card.expired) {
+        void api.respondPermission(card.request_id, "allow").catch(() => {});
+        store.resolvePermission(sid, card.request_id);
+      }
+    }
+    store.setAutoApprove(sid, true);
   };
 
   const showFull = async (uuid: string) => {
@@ -156,6 +184,18 @@ export function SessionView({ pid, sid }: { pid: string; sid: string }) {
               ■ Interrupt
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setVerbose((v) => !v)}
+            className={clsx(
+              "rounded-md border px-2 py-1 text-xs transition-colors",
+              verbose
+                ? "border-violet-500/40 text-violet-300"
+                : "border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200",
+            )}
+          >
+            verbose
+          </button>
           {(agents?.length ?? 0) > 0 && (
             <button
               type="button"
@@ -189,8 +229,10 @@ export function SessionView({ pid, sid }: { pid: string; sid: string }) {
             lastError={buffer?.lastError ?? null}
             permissions={permissions ?? []}
             loading={messagesQuery.isPending && messages.length === 0}
+            verbose={verbose}
             onShowFull={showFull}
             onDismissError={() => setSessionError(sid, null)}
+            onAllowAll={allowAll}
           />
           {messagesQuery.isError && (
             <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-1 text-[11px] text-red-400/80">
@@ -325,7 +367,7 @@ function Composer({
           ref={textareaRef}
           rows={1}
           value={value}
-          placeholder={running ? "Claude is working — Enter queues your prompt…" : "Send a prompt…"}
+          placeholder={running ? "Orchid is working — Enter queues your prompt…" : "Send a prompt…"}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -336,7 +378,7 @@ function Composer({
               onInterrupt();
             }
           }}
-          className="max-h-36 min-h-6 w-full resize-none bg-transparent text-sm leading-6 text-zinc-100 outline-none placeholder:text-zinc-600"
+          className="max-h-36 min-h-6 w-full resize-none bg-transparent text-base leading-6 text-zinc-100 outline-none placeholder:text-zinc-600 md:text-sm"
         />
         {running && (
           <button

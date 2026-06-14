@@ -11,10 +11,14 @@ from claude_agent_sdk import HookMatcher, PermissionResultAllow, PermissionResul
 from ..bus import EventBus
 from ..config import Settings
 from ..services import ApiError, SessionService
-from ..store import project_store
+from ..store import project_store, usage_store
 from ..watch.watcher import WatcherManager
+from . import roles
 from .catalog import age_seconds
 from .driver import SessionDriver
+from .elevated_tools import ELEVATED_SERVER, ELEVATED_TOOL_NAMES, build_elevated_server
+from .git_tools import GIT_SERVER, GIT_TOOL_NAMES, build_git_server
+from .planning import PLAN_SERVER, PLAN_TOOL_NAMES, build_plan_server
 from .runner import Runner, RunnerSpec
 from .transcript import TranscriptCache, _preview
 
@@ -22,6 +26,19 @@ log = logging.getLogger(__name__)
 
 PERMISSION_TIMEOUT_S = 300.0
 POST_BURST_GRACE_S = 2.0
+
+# Provably read-only tools auto-approved without prompting: they cannot mutate
+# state, so gating them only burns the approval window on diagnostics. Kept
+# deliberately narrow — only tools that are read-only by construction. Bash is
+# NOT here (it is a general shell); agents should use Grep/Read/Glob, which are.
+# Privileged content reads (elevated_read_file) stay gated; elevated_stat is
+# metadata-only and safe.
+READ_ONLY_TOOLS = frozenset({
+    "Read", "Grep", "Glob", "NotebookRead",
+    "mcp__orchid_git__git_status",
+    "mcp__orchid_git__git_diff",
+    "mcp__orchid_elevated__elevated_stat",
+})
 
 
 class DriverManager:
@@ -35,6 +52,7 @@ class DriverManager:
         sessions: SessionService,
         watcher: WatcherManager,
         settings: Settings,
+        orchidd_client=None,
     ):
         self._runner = runner
         self._bus = bus
@@ -42,9 +60,11 @@ class DriverManager:
         self._sessions = sessions
         self._watcher = watcher
         self._settings = settings
+        self._orchidd = orchidd_client
         self._drivers: dict[str, SessionDriver] = {}
         self._projects_of: dict[str, str] = {}  # sid -> project_id
-        self._perms: dict[str, tuple[asyncio.Future, str | None]] = {}
+        self._roots_of: dict[str, Path] = {}  # sid -> project root
+        self._perms: dict[str, tuple[asyncio.Future, str | None, dict]] = {}
         self._last_burst_end: dict[str, float] = {}
         self._resync_tasks: set[asyncio.Task] = set()
         self._agents: dict[str, dict[str, str]] = {}  # sid -> {agent_id: status}
@@ -61,6 +81,19 @@ class DriverManager:
 
     def live_agents(self, session_id: str) -> dict[str, str]:
         return dict(self._agents.get(session_id, {}))
+
+    def active_sessions_for_project(self, project_id: str) -> list[str]:
+        return [
+            sid for sid, pid in self._projects_of.items()
+            if pid == project_id and self.is_running(sid)
+        ]
+
+    def all_active_projects(self) -> dict[str, list[str]]:
+        result: dict[str, list[str]] = {}
+        for sid, pid in self._projects_of.items():
+            if sid in self._drivers:
+                result.setdefault(pid, []).append(sid)
+        return result
 
     # -- subagent hooks -------------------------------------------------------
 
@@ -91,10 +124,29 @@ class DriverManager:
     # -- driver construction --------------------------------------------------
 
     def _build_driver(self, root: Path, project_id: str, *, session_id: str | None,
-                      model: str | None = None, permission_mode: str | None = None) -> SessionDriver:
+                      model: str | None = None, permission_mode: str | None = None,
+                      system_prompt: Any = None, agents: dict[str, Any] | None = None,
+                      mcp_servers: dict[str, Any] | None = None,
+                      allowed_tools: list[str] | None = None,
+                      consult: bool = False) -> SessionDriver:
         project_file = project_store.read_project_file(root) or {}
         proj_settings = project_file.get("settings", {})
         holder: dict[str, SessionDriver] = {}
+
+        effective_mcp = dict(mcp_servers) if mcp_servers else {}
+        effective_allowed = list(allowed_tools) if allowed_tools else []
+        if self._orchidd:
+            elevated_server = build_elevated_server(self._orchidd)
+            effective_mcp[ELEVATED_SERVER] = elevated_server
+            effective_allowed.extend(ELEVATED_TOOL_NAMES)
+        if consult:
+            from .consult import CONSULT_SERVER, CONSULT_TOOL_NAMES, build_consult_server
+            consult_server = build_consult_server(
+                dm=self, registry=self._sessions._registry,
+                bus=self._bus, caller_holder=holder,
+            )
+            effective_mcp[CONSULT_SERVER] = consult_server
+            effective_allowed.extend(CONSULT_TOOL_NAMES)
 
         async def can_use_tool(tool_name: str, tool_input: dict[str, Any], context: Any):
             d = holder.get("driver")
@@ -109,6 +161,11 @@ class DriverManager:
                 setting_sources=["user", "project", "local"],
                 permission_mode=permission_mode or proj_settings.get("permission_mode") or "acceptEdits",
                 model=model or proj_settings.get("model"),
+                system_prompt=system_prompt,
+                agents=agents,
+                mcp_servers=effective_mcp or None,
+                allowed_tools=effective_allowed or None,
+                disallowed_tools=["AskUserQuestion"],
                 extra_options={"can_use_tool": can_use_tool, "hooks": self._subagent_hooks()},
             )
 
@@ -138,13 +195,16 @@ class DriverManager:
             status_cb=status_cb,
             on_burst_start=self._burst_started,
             on_burst_end=lambda sid: self._burst_ended(sid, project_id, root),
+            on_turn_completed=lambda sid, payload: self._record_usage(sid, project_id, root, payload),
         )
         holder["driver"] = driver
         return driver
 
-    def _register(self, sid: str, driver: SessionDriver, project_id: str) -> None:
+    def _register(self, sid: str, driver: SessionDriver, project_id: str, root: Path | None = None) -> None:
         self._drivers[sid] = driver
         self._projects_of[sid] = project_id
+        if root is not None:
+            self._roots_of[sid] = root
 
     def _burst_started(self, sid: str) -> None:
         # Suppress the watcher AND stamp "Orchid is driving this" immediately, so a
@@ -152,6 +212,22 @@ class DriverManager:
         # finishes closing) isn't misread as external terminal activity.
         self._watcher.suppress(sid)
         self._last_burst_end[sid] = time.monotonic()
+
+    def _record_usage(self, sid: str, project_id: str, root: Path, payload: dict) -> None:
+        """Persist the cost/turn data the SDK already reported, and announce the
+        new per-session total on the sidebar. Runs inside the driver's own task."""
+        if payload.get("total_cost_usd") is None:
+            return  # SDK reported no cost for this turn; nothing to accumulate
+        totals = usage_store.add_turn(
+            root, sid,
+            cost_usd=payload.get("total_cost_usd") or 0.0,
+            duration_ms=payload.get("duration_ms") or 0,
+            is_error=bool(payload.get("is_error")),
+        )
+        self._bus.publish(
+            "sidebar", "usage_updated",
+            {"project_id": project_id, "session_id": sid, "usage": totals},
+        )
 
     def _burst_ended(self, sid: str, project_id: str, root: Path) -> None:
         self._last_burst_end[sid] = time.monotonic()
@@ -170,19 +246,34 @@ class DriverManager:
 
     # -- operations -----------------------------------------------------------
 
-    async def create_session(self, project: dict, prompt: str,
-                             model: str | None = None, permission_mode: str | None = None) -> str:
+    async def create_orchestrator_session(
+        self, project: dict, prompt: str, child_roots: list[Path] | None = None,
+    ) -> str:
+        """Start a session in this project: the enabled roles wired in as subagents,
+        the AGENTS.md/goal/roster system prompt, and the plan + git MCP tools. This is
+        the one way Orchid starts a session — every session is project-aware. Edits
+        auto-apply under the project's permission_mode (acceptEdits by default); risky
+        tools still hit the broker."""
         root = Path(project["root"])
-        driver = self._build_driver(root, project["id"], session_id=None,
-                                    model=model, permission_mode=permission_mode)
+        agents, append = roles.assemble_orchestrator(root, child_roots=child_roots)
+        plan_server = build_plan_server(root, project["id"], self._bus)
+        git_server = build_git_server(root, project["id"], self._bus)
+        driver = self._build_driver(
+            root, project["id"], session_id=None,
+            system_prompt={"type": "preset", "preset": "claude_code", "append": append},
+            agents=agents,
+            mcp_servers={PLAN_SERVER: plan_server, GIT_SERVER: git_server},
+            allowed_tools=PLAN_TOOL_NAMES + GIT_TOOL_NAMES,
+            consult=True,
+        )
         await driver.prompt(prompt)
         try:
             sid = await driver.wait_session_id(30.0)
         except asyncio.TimeoutError:
             await driver.aclose()
             raise ApiError("SESSION_START_TIMEOUT", "claude did not start within 30s", 504)
-        self._register(sid, driver, project["id"])
-        project_store.set_session_flags(root, sid, created_by="orchid")
+        self._register(sid, driver, project["id"], root)
+        project_store.set_session_flags(root, sid, created_by="orchid", role="orchestrator")
         return sid
 
     async def prompt(self, session_id: str, text: str, force: bool = False) -> dict[str, Any]:
@@ -202,7 +293,7 @@ class DriverManager:
             )
         if driver is None:
             driver = self._build_driver(root, entry["id"], session_id=session_id)
-            self._register(session_id, driver, entry["id"])
+            self._register(session_id, driver, entry["id"], root)
         await driver.prompt(text)
         return {"state": "starting", "queue_len": driver.queue_len}
 
@@ -244,25 +335,24 @@ class DriverManager:
 
     async def _request_permission(self, session_id: str | None, tool_name: str,
                                   tool_input: dict[str, Any], context: Any):
+        if tool_name in READ_ONLY_TOOLS:
+            return PermissionResultAllow()  # read-only: never prompt, never time out
         request_id = uuidlib.uuid4().hex
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
-        self._perms[request_id] = (fut, session_id)
         preview, _ = _preview(tool_input)
+        payload = {
+            "request_id": request_id,
+            "tool_name": tool_name,
+            "input_preview": preview,
+            "display_name": getattr(context, "display_name", None),
+            "description": getattr(context, "description", None),
+            "expires_at": (
+                datetime.now(timezone.utc) + timedelta(seconds=PERMISSION_TIMEOUT_S)
+            ).isoformat(),
+        }
+        self._perms[request_id] = (fut, session_id, payload)
         if session_id:
-            self._bus.publish(
-                f"session:{session_id}",
-                "permission_request",
-                {
-                    "request_id": request_id,
-                    "tool_name": tool_name,
-                    "input_preview": preview,
-                    "display_name": getattr(context, "display_name", None),
-                    "description": getattr(context, "description", None),
-                    "expires_at": (
-                        datetime.now(timezone.utc) + timedelta(seconds=PERMISSION_TIMEOUT_S)
-                    ).isoformat(),
-                },
-            )
+            self._bus.publish(f"session:{session_id}", "permission_request", payload)
         try:
             behavior, message = await asyncio.wait_for(fut, PERMISSION_TIMEOUT_S)
         except asyncio.TimeoutError:
@@ -279,23 +369,67 @@ class DriverManager:
             raise ApiError("PERMISSION_GONE", "permission request expired or already resolved", 410)
         entry[0].set_result((behavior, message))
 
+    def pending_permissions(self, session_id: str) -> list[dict]:
+        return [
+            payload
+            for _rid, (fut, sid, payload) in self._perms.items()
+            if sid == session_id and not fut.done()
+        ]
+
     def _deny_pending(self, session_id: str, message: str) -> None:
-        for request_id, (fut, sid) in list(self._perms.items()):
+        for request_id, (fut, sid, _payload) in list(self._perms.items()):
             if sid == session_id and not fut.done():
                 fut.set_result(("deny", message))
 
     # -- lifecycle ------------------------------------------------------------
 
+    def _running_sessions_path(self) -> Path:
+        return self._settings.orchid_home / "running_sessions.json"
+
+    def _persist_running(self) -> None:
+        """Save the set of in-flight sessions so a restart can resume them."""
+        running = {}
+        for sid, d in self._drivers.items():
+            pid = self._projects_of.get(sid)
+            root = self._roots_of.get(sid)
+            if (d.state == "running" or d.queue_len > 0) and pid and root:
+                running[sid] = {"project_id": pid, "root": str(root)}
+        if running:
+            from ..store.jsonio import atomic_write_json
+            atomic_write_json(self._running_sessions_path(), running)
+        else:
+            self._running_sessions_path().unlink(missing_ok=True)
+
+    async def auto_resume(self) -> None:
+        """Reconnect drivers for sessions that were running before the last shutdown."""
+        path = self._running_sessions_path()
+        if not path.exists():
+            return
+        from ..store.jsonio import load_json
+        running: dict[str, dict] = load_json(path, default={})
+        path.unlink(missing_ok=True)
+        if not running:
+            return
+        for sid, info in running.items():
+            try:
+                root = Path(info["root"])
+                project_id = info["project_id"]
+                if not root.exists():
+                    log.debug("auto-resume: root %s gone, skipping %s", root, sid)
+                    continue
+                driver = self._build_driver(root, project_id, session_id=sid)
+                self._register(sid, driver, project_id, root)
+                await driver.prompt("continue")
+                log.info("auto-resumed session %s (project %s)", sid, project_id)
+            except Exception:
+                log.warning("auto-resume failed for %s", sid, exc_info=True)
+
     async def aclose(self) -> None:
         for task in list(self._resync_tasks):
             task.cancel()
-        for sid, driver in list(self._drivers.items()):
+        self._persist_running()
+        for sid in list(self._drivers):
             self._deny_pending(sid, "orchid is shutting down")
-            try:
-                await driver.interrupt()
-            except Exception:
-                pass
-        await asyncio.sleep(0)  # let interrupts land
         results = await asyncio.gather(
             *(d.aclose() for d in self._drivers.values()), return_exceptions=True
         )

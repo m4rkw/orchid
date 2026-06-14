@@ -14,8 +14,6 @@ def _manager(request: Request):
 
 class NewSessionBody(BaseModel):
     prompt: str
-    model: str | None = None
-    permission_mode: str | None = None
 
 
 class PromptBody(BaseModel):
@@ -66,11 +64,20 @@ async def agent_messages(request: Request, session_id: str, agent_id: str):
     return await _sessions(request).agent_messages(session_id, agent_id)
 
 
+@router.get("/sessions/{session_id}/permissions")
+async def session_permissions(request: Request, session_id: str):
+    return _manager(request).pending_permissions(session_id)
+
+
 @router.post("/projects/{project_id}/sessions", status_code=201)
 async def create_session(request: Request, project_id: str, body: NewSessionBody):
-    entry = request.app.state.service.get_entry(project_id)
-    sid = await _manager(request).create_session(
-        entry, body.prompt, model=body.model, permission_mode=body.permission_mode
+    """Start a session in a project. Every session is an orchestrator session:
+    project-aware (AGENTS.md + goal + roster) with the plan/git tools wired in."""
+    svc = request.app.state.service
+    entry = svc.get_entry(project_id)
+    child_roots = svc.child_roots(project_id)
+    sid = await _manager(request).create_orchestrator_session(
+        entry, body.prompt, child_roots=child_roots or None,
     )
     return {"session_id": sid}
 

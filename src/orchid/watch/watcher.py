@@ -7,6 +7,7 @@ from watchfiles import awatch
 from ..claude.catalog import Catalog
 from ..models import Project
 from ..services import SessionService
+from ..store import project_store
 from ..config import Settings
 
 log = logging.getLogger(__name__)
@@ -16,8 +17,11 @@ class WatcherManager:
     """One watchfiles task over <claude_config>/projects/, routing transcript
     changes to SessionService.refresh_from_disk by project key.
 
-    This is how terminal-driven sessions appear (and stream) in the web UI.
-    Driver-active session ids are suppressed (M3) to keep one-writer semantics.
+    This is how Orchid-owned sessions stream into the web UI when their files
+    change. Only sessions Orchid created are routed — terminal-started
+    transcripts in a watched directory are ignored, so Orchid never surfaces or
+    streams a session it doesn't own. Driver-active session ids are additionally
+    suppressed (M3) to keep one-writer semantics during a burst.
     """
 
     def __init__(self, catalog: Catalog, sessions: SessionService, settings: Settings):
@@ -105,6 +109,8 @@ class WatcherManager:
         for sid, (project_id, root) in targets.items():
             if sid in self._suppressed:
                 continue
+            if not project_store.is_orchid_session(root, sid):
+                continue  # terminal-started session — not ours to surface or stream
             try:
                 await self._sessions.refresh_from_disk(sid, project_id, root)
             except Exception:

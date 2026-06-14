@@ -203,11 +203,21 @@ export function ResultDivider({ text, animate = true }: { text: string; animate?
   );
 }
 
-/** The pulsing caret shown while Claude is working. */
+/** Prominent indicator shown while Orchid is generating a turn. */
 export function RunningCursor() {
   return (
-    <div className="animate-pulse pl-1 font-mono text-sm text-violet-400/80" aria-label="Claude is working">
-      ▍
+    <div
+      role="status"
+      aria-label="Orchid is working"
+      className="fade-up flex items-center gap-2.5 pl-1 text-sm text-violet-300"
+    >
+      <span className="size-3.5 animate-spin rounded-full border-2 border-violet-400/30 border-t-violet-400" />
+      <span className="font-medium">Orchid is working</span>
+      <span className="inline-flex items-center gap-0.5">
+        <span className="size-1 animate-bounce rounded-full bg-violet-400/70 [animation-delay:-0.3s]" />
+        <span className="size-1 animate-bounce rounded-full bg-violet-400/70 [animation-delay:-0.15s]" />
+        <span className="size-1 animate-bounce rounded-full bg-violet-400/70" />
+      </span>
     </div>
   );
 }

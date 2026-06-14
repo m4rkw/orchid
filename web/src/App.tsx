@@ -1,15 +1,23 @@
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { clsx } from "clsx";
 import { api } from "./api/client";
-import { OnboardingChat } from "./components/onboarding/OnboardingChat";
+import { CollaborationView } from "./components/collaboration/CollaborationView";
+import { NewCollaboration } from "./components/collaboration/NewCollaboration";
+import { ConsoleChat } from "./components/console/ConsoleChat";
+import { ProjectDashboard } from "./components/project/ProjectDashboard";
+import { PlansView } from "./components/project/PlansView";
 import { ProjectSettings } from "./components/project/ProjectSettings";
+import { ReviewPanel } from "./components/project/ReviewPanel";
 import { NewSessionComposer } from "./components/session/NewSessionComposer";
 import { SessionView } from "./components/session/SessionView";
 import { ProjectTree } from "./components/tree/ProjectTree";
-import { useAppStore } from "./state/stores";
+import { isCollabSel, isNewCollabSel, isProjectSel, useAppStore } from "./state/stores";
 import { useWsStatus } from "./ws/useWsStatus";
 
 export default function App() {
   const selected = useAppStore((s) => s.selected);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const ws = useWsStatus();
   const health = useQuery({
     queryKey: ["health"],
@@ -18,10 +26,22 @@ export default function App() {
     retry: false,
   });
 
+  useEffect(() => setSidebarOpen(false), [selected]);
+
   return (
     <div className="flex h-screen flex-col bg-ink-950 text-zinc-200">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-zinc-800 px-4">
         <div className="flex items-center gap-2 select-none">
+          <button
+            type="button"
+            aria-label="Toggle sidebar"
+            className="rounded p-1 text-zinc-400 hover:text-zinc-200 md:hidden"
+            onClick={() => setSidebarOpen((v) => !v)}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
+              <path fillRule="evenodd" d="M2 4.75A.75.75 0 0 1 2.75 4h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4.75ZM2 10a.75.75 0 0 1 .75-.75h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 10Zm0 5.25a.75.75 0 0 1 .75-.75h14.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" />
+            </svg>
+          </button>
           <span className="text-lg leading-none text-violet-400">⚘</span>
           <span className="bg-gradient-to-r from-violet-300 to-fuchsia-300 bg-clip-text text-sm font-semibold tracking-wide text-transparent">
             Orchid
@@ -56,19 +76,39 @@ export default function App() {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1">
-        <aside className="flex w-80 shrink-0 flex-col overflow-hidden border-r border-zinc-800">
+      <div className="relative flex min-h-0 flex-1">
+        {sidebarOpen && (
+          <div className="absolute inset-0 z-20 bg-black/50 md:hidden" onClick={() => setSidebarOpen(false)} />
+        )}
+        <aside
+          className={clsx(
+            "flex shrink-0 flex-col overflow-hidden border-r border-zinc-800 bg-ink-950",
+            "absolute inset-y-0 left-0 z-30 w-80 max-w-[85vw] transition-transform duration-200 ease-in-out",
+            sidebarOpen ? "translate-x-0" : "-translate-x-full",
+            "md:relative md:z-auto md:max-w-none md:translate-x-0 md:transition-none",
+          )}
+        >
           <ProjectTree />
         </aside>
         <main className="min-w-0 flex-1 overflow-hidden">
-          {selected?.sid ? (
+          {isCollabSel(selected) ? (
+            <CollaborationView key={selected.collab} cid={selected.collab} />
+          ) : isNewCollabSel(selected) ? (
+            <NewCollaboration />
+          ) : isProjectSel(selected) && selected.sid ? (
             <SessionView key={selected.sid} pid={selected.pid} sid={selected.sid} />
-          ) : selected?.settings ? (
+          ) : isProjectSel(selected) && selected.settings ? (
             <ProjectSettings key={`settings-${selected.pid}`} pid={selected.pid} />
-          ) : selected?.compose ? (
+          ) : isProjectSel(selected) && selected.plans ? (
+            <PlansView key={`plans-${selected.pid}`} pid={selected.pid} />
+          ) : isProjectSel(selected) && selected.reviews ? (
+            <ReviewPanel key={`reviews-${selected.pid}-${selected.reviewId ?? ""}`} pid={selected.pid} />
+          ) : isProjectSel(selected) && selected.compose ? (
             <NewSessionComposer key={selected.pid} pid={selected.pid} />
+          ) : isProjectSel(selected) ? (
+            <ProjectDashboard key={`dash-${selected.pid}`} pid={selected.pid} />
           ) : (
-            <OnboardingChat />
+            <ConsoleChat />
           )}
         </main>
       </div>

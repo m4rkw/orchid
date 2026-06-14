@@ -6,6 +6,7 @@ from claude_agent_sdk import project_key_for_directory
 
 from orchid.claude.catalog import Catalog
 from orchid.config import Settings
+from orchid.store import project_store
 from orchid.watch.watcher import WatcherManager
 
 pytestmark = pytest.mark.asyncio
@@ -23,6 +24,9 @@ class FakeSessions:
 async def manager(homes, settings):
     root = homes.tmp / "watched"
     root.mkdir()
+    # The watcher only routes sessions Orchid created; flag the ones these tests drive.
+    for sid in ("abc-123", "def-456", "live-1"):
+        project_store.set_session_flags(root, sid, created_by="orchid")
     sessions = FakeSessions()
     m = WatcherManager(Catalog(), sessions, settings)
     await m._register("prj_w", root)
@@ -43,6 +47,14 @@ async def test_handle_routes_main_and_subagent_paths(manager):
         }
     )
     assert sorted(sessions.calls) == [("abc-123", "prj_w"), ("def-456", "prj_w")]
+
+
+async def test_handle_ignores_unowned_session(manager):
+    # A terminal-started transcript (no created_by=orchid flag) must never route,
+    # even though its path maps to a watched project.
+    m, sessions, base, key = manager
+    await m._handle({str(base / key / "terminal-xyz.jsonl")})
+    assert sessions.calls == []
 
 
 async def test_handle_respects_suppression(manager):

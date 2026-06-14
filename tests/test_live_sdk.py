@@ -41,6 +41,9 @@ async def test_orchid_session_is_real_and_on_disk(tmp_path):
 
     registry = Registry(settings.registry_path)
     project_store.init_project(workspace, "prj_live", "Live")
+    pf = project_store.read_project_file(workspace)
+    pf["settings"]["model"] = "haiku"  # orchestrator session uses the project's model
+    project_store.write_project_file(workspace, pf)
     entry = registry.add("prj_live", workspace)
     bus, cache, catalog = EventBus(), TranscriptCache(), Catalog()
     sessions = SessionService(registry, catalog, cache, bus, settings)
@@ -50,9 +53,8 @@ async def test_orchid_session_is_real_and_on_disk(tmp_path):
     sessions.live_agents = manager.live_agents
 
     try:
-        sid = await manager.create_session(
+        sid = await manager.create_orchestrator_session(
             entry, "Reply with exactly the word: pong. Do not use any tools.",
-            model="haiku",
         )
         assert sid
         # transcript exists on disk under the real config dir

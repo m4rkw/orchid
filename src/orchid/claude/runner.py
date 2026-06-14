@@ -19,6 +19,7 @@ class RunnerSpec:
     setting_sources: list[str] | None = None
     model: str | None = None
     max_turns: int | None = None
+    agents: dict[str, Any] | None = None  # name -> AgentDefinition (orchestrator subagents)
     extra_options: dict[str, Any] = field(default_factory=dict)
 
 
@@ -55,6 +56,8 @@ def _build_options(spec: RunnerSpec) -> ClaudeAgentOptions:
         kwargs["model"] = spec.model
     if spec.max_turns is not None:
         kwargs["max_turns"] = spec.max_turns
+    if spec.agents is not None:
+        kwargs["agents"] = spec.agents
     return ClaudeAgentOptions(**kwargs)
 
 
