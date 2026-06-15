@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { api, ApiError } from "../../api/client";
 import { useAppStore } from "../../state/stores";
+import { Markdown } from "../common/Markdown";
 
 export function SpecView({ pid }: { pid: string }) {
   const select = useAppStore((s) => s.select);
@@ -14,6 +15,7 @@ export function SpecView({ pid }: { pid: string }) {
   });
 
   const [editing, setEditing] = useState(false);
+  const [preview, setPreview] = useState(false);
   const [draft, setDraft] = useState("");
   const [title, setTitle] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -22,12 +24,14 @@ export function SpecView({ pid }: { pid: string }) {
     setDraft(spec.data?.content ?? "");
     setTitle(spec.data?.title ?? "Specification");
     setEditing(true);
+    setPreview(false);
   }, [spec.data]);
 
   const startNew = useCallback(() => {
     setDraft("");
     setTitle("Specification");
     setEditing(true);
+    setPreview(false);
   }, []);
 
   useEffect(() => {
@@ -102,14 +106,46 @@ export function SpecView({ pid }: { pid: string }) {
               placeholder="Specification title"
               className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-violet-500"
             />
-            <textarea
-              ref={textareaRef}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="Write your specification in markdown…"
-              rows={24}
-              className="w-full resize-y rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-xs leading-relaxed text-zinc-200 outline-none focus:border-violet-500"
-            />
+            <div className="flex gap-1 border-b border-zinc-800 pb-1">
+              <button
+                type="button"
+                onClick={() => setPreview(false)}
+                className={clsx(
+                  "rounded-t px-2 py-1 text-xs",
+                  !preview ? "bg-zinc-800 text-zinc-200" : "text-zinc-500 hover:text-zinc-300",
+                )}
+              >
+                Write
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreview(true)}
+                className={clsx(
+                  "rounded-t px-2 py-1 text-xs",
+                  preview ? "bg-zinc-800 text-zinc-200" : "text-zinc-500 hover:text-zinc-300",
+                )}
+              >
+                Preview
+              </button>
+            </div>
+            {preview ? (
+              <div className="min-h-[20rem] rounded-md border border-zinc-700 bg-zinc-900 p-4">
+                {draft.trim() ? (
+                  <Markdown>{draft}</Markdown>
+                ) : (
+                  <p className="text-xs text-zinc-600">Nothing to preview</p>
+                )}
+              </div>
+            ) : (
+              <textarea
+                ref={textareaRef}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="Write your specification in markdown…"
+                rows={24}
+                className="w-full resize-y rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-xs leading-relaxed text-zinc-200 outline-none focus:border-violet-500"
+              />
+            )}
             <div className="flex items-center justify-end gap-2">
               <button
                 type="button"
@@ -146,8 +182,8 @@ export function SpecView({ pid }: { pid: string }) {
                 v{spec.data!.version}
               </span>
             </div>
-            <div className="mt-4 space-y-2 whitespace-pre-wrap font-mono text-xs leading-relaxed text-zinc-300">
-              {spec.data!.content}
+            <div className="mt-4">
+              <Markdown>{spec.data!.content}</Markdown>
             </div>
             {spec.data!.updated_at && (
               <div className="mt-4 text-[10px] text-zinc-600">
