@@ -9,7 +9,7 @@ from claude_agent_sdk import create_sdk_mcp_server, tool
 from ..bus import EventBus
 from ..config import Settings
 from ..services import ApiError, ProjectService
-from ..store import agents_store, project_store
+from ..store import agents_store, project_store, spec_store
 from ..store.paths import canonicalize
 from . import roles
 from .driver import SessionDriver
@@ -32,16 +32,22 @@ AGENTS.md and ask the user to confirm or correct it.
 5. Only after explicit confirmation: call register_project, then write_agents_md with the agreed \
 content, then assign_roles (default: orchestrator, worker, reviewer, verifier — unless the user \
 wants different).
-6. Check for a .git directory. If missing, offer to initialise one with git_init — Orchid's branch \
+6. Living specification: look for an existing spec file (SPEC.md, spec.md, specification.md, or \
+similar) in the project root. If found, read it and propose importing it as the project's living \
+spec. If not found, draft a concise specification based on what you learned about the project — \
+it should describe what the project does, its key features/behaviours, and acceptance criteria or \
+constraints that agents should verify against. Show the proposed spec and ask for confirmation. \
+After confirmation, call write_spec. The spec can always be edited later in the UI or by agents.
+7. Check for a .git directory. If missing, offer to initialise one with git_init — Orchid's branch \
 workflow requires git.
-7. Ask about their intent — call ask_choice(question, "Ad-hoc changes,Working towards a goal"):
+8. Ask about their intent — call ask_choice(question, "Ad-hoc changes,Working towards a goal"):
    - "Ad-hoc changes" — using sessions for quick, unrelated tasks; no overarching goal
    - "Working towards a goal" — there's a specific end state in mind
    If they pick the goal, ask them to describe it in a sentence or two (free text — no ask_choice).
-8. Ask about review mode — call ask_choice(question, "Manual review,Fully autonomous"):
+9. Ask about review mode — call ask_choice(question, "Manual review,Fully autonomous"):
    - "Manual review" — they review branches and approve merges themselves
    - "Fully autonomous" — a reviewer agent automatically reviews and approves changes
-9. Store with set_project_intent. Summarise: "Project set up. Intent: <x>, review: <y>."
+10. Store with set_project_intent. Summarise: "Project set up. Intent: <x>, review: <y>."
 
 When creating a project from scratch:
 1. Ask what they want to build — gather enough to pick a language/framework and structure.
@@ -403,9 +409,51 @@ def build_onboarding_tools(service: ProjectService, bus: EventBus) -> list[Any]:
         except OSError as exc:
             return _text(f"Error: {exc}")
 
+    @tool(
+        "write_spec",
+        "Write (or overwrite) the project's living specification — the canonical reference all "
+        "agents verify their work against. Content is markdown. Call only after the user has "
+        "approved the spec content.",
+        {"path": str, "title": str, "content": str},
+    )
+    async def write_spec(args: dict[str, Any]) -> dict[str, Any]:
+        try:
+            root = canonicalize(args["path"])
+            if not root.is_dir():
+                return _text(f"Error: {root} is not a directory.")
+            content = (args.get("content") or "").strip()
+            if not content:
+                return _text("Error: spec content is required.")
+            from datetime import datetime as _dt, timezone as _tz
+            now = _dt.now(_tz.utc).isoformat()
+            existing = spec_store.read_spec(root)
+            if existing:
+                existing["content"] = content
+                existing["version"] = existing.get("version", 0) + 1
+                existing["updated_at"] = now
+                if args.get("title"):
+                    existing["title"] = args["title"]
+                spec_store.write_spec(root, existing)
+                version = existing["version"]
+            else:
+                spec = {
+                    "version": 1,
+                    "title": args.get("title") or "Specification",
+                    "content": content,
+                    "status": "active",
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                spec_store.write_spec(root, spec)
+                version = 1
+            bus.publish("onboarding", "spec_written", {"path": str(root)})
+        except OSError as exc:
+            return _text(f"Error writing spec: {exc}")
+        return _text(f"Wrote specification v{version} ({len(content)} chars).")
+
     return [list_directory, inspect_directory, register_project, write_agents_md,
             assign_roles, git_init, ask_choice, set_project_intent,
-            scaffold_project, add_child_project, remove_child_project]
+            scaffold_project, add_child_project, remove_child_project, write_spec]
 
 
 def build_onboarding_driver(
@@ -433,6 +481,7 @@ def build_onboarding_driver(
                 "mcp__orchid__scaffold_project",
                 "mcp__orchid__add_child_project",
                 "mcp__orchid__remove_child_project",
+                "mcp__orchid__write_spec",
             ],
             disallowed_tools=["Bash", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch", "Task", "AskUserQuestion"],
             permission_mode="bypassPermissions",

@@ -20,6 +20,7 @@ from .elevated_tools import ELEVATED_SERVER, ELEVATED_TOOL_NAMES, build_elevated
 from .git_tools import GIT_SERVER, GIT_TOOL_NAMES, build_git_server
 from .planning import PLAN_SERVER, PLAN_TOOL_NAMES, build_plan_server
 from .runner import Runner, RunnerSpec
+from .spec_tools import SPEC_SERVER, SPEC_TOOL_NAMES, build_spec_server
 from .transcript import TranscriptCache, _preview
 
 log = logging.getLogger(__name__)
@@ -260,12 +261,13 @@ class DriverManager:
         agents, append = roles.assemble_orchestrator(root, child_roots=child_roots)
         plan_server = build_plan_server(root, project["id"], self._bus)
         git_server = build_git_server(root, project["id"], self._bus, notifier=self._notifier)
+        spec_server = build_spec_server(root, project["id"], self._bus)
         driver = self._build_driver(
             root, project["id"], session_id=None,
             system_prompt={"type": "preset", "preset": "claude_code", "append": append},
             agents=agents,
-            mcp_servers={PLAN_SERVER: plan_server, GIT_SERVER: git_server},
-            allowed_tools=PLAN_TOOL_NAMES + GIT_TOOL_NAMES,
+            mcp_servers={PLAN_SERVER: plan_server, GIT_SERVER: git_server, SPEC_SERVER: spec_server},
+            allowed_tools=PLAN_TOOL_NAMES + GIT_TOOL_NAMES + SPEC_TOOL_NAMES,
             consult=True,
         )
         await driver.prompt(prompt)
@@ -360,12 +362,12 @@ class DriverManager:
             self._bus.publish(f"session:{session_id}", "permission_request", payload)
             if first_pending and self._notifier:
                 pid = self._projects_of.get(session_id)
-                asyncio.create_task(self._notifier.push(
+                self._notifier.push_bg(
                     "Orchid — approval needed",
                     f"{tool_name} is waiting for your decision.",
                     url=self._notifier.session_url(pid, session_id),
                     url_title="Review in Orchid",
-                ))
+                )
         try:
             behavior, message = await asyncio.wait_for(fut, PERMISSION_TIMEOUT_S)
         except asyncio.TimeoutError:

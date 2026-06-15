@@ -22,7 +22,7 @@ from pathlib import Path
 from claude_agent_sdk import AgentDefinition
 
 from ..models import RoleTemplate
-from ..store import agents_store, project_store
+from ..store import agents_store, project_store, spec_store
 
 # Tools a non-editing role may use (reviewer/verifier). Edits are reserved for
 # the worker; everything risky still passes the permission broker.
@@ -145,6 +145,13 @@ PLANNER_INSTRUCTIONS = (
     "delegate to the relevant subagent(s), have the verifier confirm, then update the step."
 )
 
+SPEC_INSTRUCTIONS = (
+    "This project has a living specification (get_spec / update_spec). The spec is the canonical "
+    "reference for what the project should do — verify your work against it. When you add features, "
+    "change behaviour, or modify requirements, update the spec to reflect the change BEFORE "
+    "submitting for review. The spec must always describe the current intended state of the project."
+)
+
 
 def resolve_roles(root: Path) -> list[RoleTemplate]:
     """Built-in templates merged with this project's saved overrides (agents.json)."""
@@ -241,6 +248,14 @@ def assemble_orchestrator(
         parts.append(goal_section)
     parts.append(PLANNER_INSTRUCTIONS)
     parts.append(BRANCH_WORKFLOW_INSTRUCTIONS)
+
+    spec = spec_store.read_spec(root)
+    if spec:
+        parts.append(SPEC_INSTRUCTIONS)
+        parts.append(
+            f"# Project specification (v{spec.get('version', 1)})\n\n"
+            f"{spec['content']}"
+        )
 
     text = _read_agents_md(root)
     if text:

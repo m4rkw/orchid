@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { clsx } from "clsx";
-import { api } from "../../api/client";
+import { api, ApiError } from "../../api/client";
 import type { GitCommit, Plan, ReviewRequest, SessionSummary } from "../../api/types";
 import { useAppStore } from "../../state/stores";
 import { RelativeTime } from "../common/RelativeTime";
@@ -14,6 +14,11 @@ export function ProjectDashboard({ pid }: { pid: string }) {
   const reviews = useQuery({ queryKey: ["reviews", pid], queryFn: () => api.projectReviews(pid) });
   const sessions = useQuery({ queryKey: ["sessions", pid], queryFn: () => api.sessions(pid) });
   const usage = useQuery({ queryKey: ["usage", pid], queryFn: () => api.projectUsage(pid) });
+  const spec = useQuery({
+    queryKey: ["spec", pid],
+    queryFn: () => api.projectSpec(pid),
+    retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 2,
+  });
   const select = useAppStore((s) => s.select);
   const statuses = useAppStore((s) => s.sessionStatuses);
 
@@ -114,6 +119,13 @@ export function ProjectDashboard({ pid }: { pid: string }) {
           </button>
           <button
             type="button"
+            onClick={() => select({ pid, spec: true })}
+            className="rounded-md bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700"
+          >
+            Spec
+          </button>
+          <button
+            type="button"
             onClick={() => select({ pid, settings: true })}
             className="rounded-md bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700"
           >
@@ -161,6 +173,25 @@ export function ProjectDashboard({ pid }: { pid: string }) {
               ))}
             </div>
           </div>
+        )}
+
+        {/* Spec */}
+        {spec.data && (
+          <button
+            type="button"
+            onClick={() => select({ pid, spec: true })}
+            className="w-full rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 text-left transition-colors hover:border-zinc-700"
+          >
+            <div className="flex items-center gap-2">
+              <div className="text-[11px] font-medium tracking-wider text-zinc-500 uppercase">
+                Specification
+              </div>
+              <span className="rounded-full bg-violet-500/15 px-1.5 py-px text-[10px] text-violet-300">
+                v{spec.data.version}
+              </span>
+            </div>
+            <p className="mt-1 truncate text-xs text-zinc-400">{spec.data.title}</p>
+          </button>
         )}
 
         {/* Recent activity (changelog) */}

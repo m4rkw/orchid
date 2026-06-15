@@ -245,6 +245,20 @@ export type GitCommit = {
   refs: string;
 };
 
+export type Spec = {
+  version: number;
+  title: string;
+  content: string;
+  status: "active" | "archived";
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type SpecUpdatedEvent = {
+  project_id: string;
+  spec: Spec;
+};
+
 export type ReviewStatus = "pending" | "approved" | "changes_requested" | "merged";
 
 export type ReviewRequest = {

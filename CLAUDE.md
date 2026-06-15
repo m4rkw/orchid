@@ -40,17 +40,19 @@ transcripts under `~/.claude/projects/`.
 - `claude/catalog.py` — at-rest SDK reads (sessions/messages/subagents/rename/delete/fork).
 - `claude/transcript.py` — SDK msg → `NormalizedMessage`; `TranscriptCache` (uuid diff, 2k cap, 16KB block previews).
 - `claude/onboarding.py` — hold-open driver ("console") + in-process MCP tools (list/inspect/register
-  project, analyse → write AGENTS.md, assign_roles, git_init, set_project_intent,
+  project, analyse → write AGENTS.md, write_spec, assign_roles, git_init, set_project_intent,
   scaffold_project, add_child_project, remove_child_project).
 - `claude/roles.py` — built-in agent-role templates (lean: orchestrator + worker/reviewer/verifier
   subagents; router/retriever/memory/tool-action ship off as "covered by Orchid/model").
   `assemble_orchestrator(root, child_roots=)` → SDK `agents=` map + system-prompt append (roster +
-  AGENTS.md + planner/branch workflow instructions). For meta-projects, child AGENTS.md files are
-  injected under headings so the orchestrator has full cross-project context.
+  AGENTS.md + spec + planner/branch workflow instructions). For meta-projects, child AGENTS.md
+  files are injected under headings so the orchestrator has full cross-project context.
 - `claude/planning.py` — in-process MCP `orchid_plan` tools the orchestrator uses to persist a plan
   to `.orchid/plans/`; each mutation emits `plan_upserted` on `sidebar`.
+- `claude/spec_tools.py` — in-process MCP `orchid_spec` tools (get_spec, update_spec) for the
+  project's living specification; agents verify work against it and update it when behaviour changes.
 - `claude/git_tools.py` — in-process MCP `orchid_git` tools (create_branch, git_status, git_commit,
-  git_diff, request_review) wired into orchestrator sessions alongside planning tools.
+  git_diff, request_review) wired into orchestrator sessions alongside planning and spec tools.
 - `watch/watcher.py` — one `watchfiles` task over `<config>/projects/`; routes changes by key
   for `created_by == "orchid"` sids only; suppressed for driver-active sids (one-writer).
 - `services.py` — `ProjectService` (CRUD, shared by API + onboarding tool) and `SessionService`
@@ -66,6 +68,7 @@ transcripts under `~/.claude/projects/`.
 - `<root>/.orchid/sessions.json` — sparse flags `{<sid>:{pinned, archived, created_by, role, first_seen_at}}`
   (`role:"orchestrator"` marks an orchestrator session)
 - `<root>/.orchid/agents.json` — sparse per-role overrides on top of the `claude/roles.py` built-ins
+- `<root>/.orchid/spec.json` — the living specification (canonical reference agents verify against)
 - `<root>/.orchid/plans/<id>.json` — the orchestrator's durable plans (planner MCP tools own these)
 - `<root>/.orchid/reviews/<id>.json` — branch review requests (pending/merged/changes_requested)
 - `<root>/AGENTS.md` — project memory written during onboarding; injected into every orchestrator prompt

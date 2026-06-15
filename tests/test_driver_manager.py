@@ -119,8 +119,10 @@ async def test_create_orchestrator_session_wires_roles_and_plan_tools(harness):
     assert spec.permission_mode == "acceptEdits"  # falls back to project setting
     assert spec.mcp_servers and "orchid_plan" in spec.mcp_servers
     assert spec.mcp_servers and "orchid_git" in spec.mcp_servers
+    assert spec.mcp_servers and "orchid_spec" in spec.mcp_servers
     from orchid.claude.git_tools import GIT_TOOL_NAMES
-    assert spec.allowed_tools == PLAN_TOOL_NAMES + GIT_TOOL_NAMES + CONSULT_TOOL_NAMES
+    from orchid.claude.spec_tools import SPEC_TOOL_NAMES
+    assert spec.allowed_tools == PLAN_TOOL_NAMES + GIT_TOOL_NAMES + SPEC_TOOL_NAMES + CONSULT_TOOL_NAMES
     sp = spec.system_prompt
     assert sp["type"] == "preset" and sp["preset"] == "claude_code"
     assert "orchestrator for this project" in sp["append"]
@@ -160,7 +162,7 @@ class _FakeNotifier:
     def session_url(self, pid, sid):
         return f"u/{pid}/{sid}"
 
-    async def push(self, title, message, url=None, url_title=None):
+    def push_bg(self, title, message, url=None, url_title=None):
         self.pushes.append((title, message, url))
 
 
@@ -175,9 +177,8 @@ async def test_permission_request_pushes_once_per_burst(harness):
     # A second concurrent request in the same burst must NOT fire another push.
     t2 = asyncio.create_task(h.manager._request_permission(SID, "Write", {}, None))
     await wait_for(lambda: len(h.manager.pending_permissions(SID)) == 2)
-    await asyncio.sleep(0.02)  # let the push task run
 
-    assert len(fake.pushes) == 1
+    assert len(fake.pushes) == 1  # push_bg called synchronously, once
     assert fake.pushes[0][2] == f"u/prj_d/{SID}"
 
     for p in list(h.manager.pending_permissions(SID)):

@@ -18,6 +18,7 @@ import type {
   RoleTemplate,
   SessionDetail,
   SessionSummary,
+  Spec,
 } from "./types";
 
 /** Normalized API error: carries HTTP status plus the backend's {error:{code,message}} body when present. */
@@ -186,6 +187,15 @@ export const api = {
 
   projectUsage: (pid: string) =>
     request<ProjectUsage>(`/api/projects/${encodeURIComponent(pid)}/usage`),
+
+  projectSpec: (pid: string) =>
+    request<Spec>(`/api/projects/${encodeURIComponent(pid)}/spec`),
+
+  putProjectSpec: (pid: string, content: string, title?: string) =>
+    request<Spec>(`/api/projects/${encodeURIComponent(pid)}/spec`, {
+      method: "PUT",
+      body: JSON.stringify(title !== undefined ? { content, title } : { content }),
+    }),
 
   projectReviews: (pid: string) =>
     request<ReviewRequest[]>(`/api/projects/${encodeURIComponent(pid)}/reviews`),

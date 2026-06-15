@@ -425,6 +425,16 @@ function ProjectRow({
                   >
                     Reviews
                   </button>
+                  <button
+                    type="button"
+                    className="w-full rounded px-2 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                    onClick={() => {
+                      closeMenu();
+                      useAppStore.getState().select({ pid: project.id, spec: true });
+                    }}
+                  >
+                    Spec
+                  </button>
                   <div className="my-1 h-px bg-zinc-800" />
                   <button
                     type="button"
