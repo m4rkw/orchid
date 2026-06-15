@@ -119,12 +119,12 @@ def build_git_tools(root: Path, project_id: str, bus: EventBus, notifier: Any = 
             "branch": branch, "summary": summary, "review_mode": review_mode,
         })
         if notifier is not None and review_mode != "autonomous":
-            __import__("asyncio").create_task(notifier.push(
+            notifier.push_bg(
                 "Orchid — review requested",
                 f"{branch}: {summary}",
                 url=notifier.review_url(project_id, review_id),
                 url_title="Review in Orchid",
-            ))
+            )
         warn = "" if verification else (
             " No verification evidence was attached — correctness will be treated as "
             "UNCONFIRMED; run the project's checks and resubmit with the output."

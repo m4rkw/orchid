@@ -23,6 +23,9 @@ class Notifier:
         self._token = settings.pushover_token
         self._user = settings.pushover_user
         self._base = settings.public_base_url
+        # Keep strong refs to in-flight fire-and-forget tasks: the event loop
+        # only holds weak refs, so an unreferenced task can be GC'd mid-send.
+        self._tasks: set = set()
 
     @property
     def pushover_enabled(self) -> bool:
@@ -37,6 +40,17 @@ class Notifier:
         if project_id and review_id:
             return f"{self._base}/?project={project_id}&review={review_id}"
         return self._base
+
+    def push_bg(self, title: str, message: str, url: str | None = None,
+                url_title: str | None = None) -> None:
+        """Fire-and-forget from a sync call site (a tool handler / the broker),
+        holding a strong ref so the task can't be garbage-collected mid-send."""
+        if not self.pushover_enabled:
+            return
+        import asyncio as _asyncio
+        task = _asyncio.create_task(self.push(title, message, url, url_title))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     async def push(self, title: str, message: str, url: str | None = None,
                    url_title: str | None = None) -> None:

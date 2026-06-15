@@ -47,6 +47,30 @@ async def test_pushover_sends_with_url(settings, monkeypatch):
     assert data["url_title"] == "Open"
 
 
+def test_push_bg_disabled_is_noop(settings):
+    n = Notifier(settings)  # disabled — returns before scheduling any task
+    n.push_bg("T", "B")
+    assert n._tasks == set()
+
+
+@pytest.mark.asyncio
+async def test_push_bg_schedules_holds_ref_and_sends(settings, monkeypatch):
+    import asyncio
+
+    calls = []
+    monkeypatch.setattr(
+        "orchid.notify.requests.post",
+        lambda url, data=None, timeout=None: calls.append(data),
+    )
+    s = dataclasses.replace(settings, pushover_token="t", pushover_user="u", base_url="http://x")
+    n = Notifier(s)
+    n.push_bg("T", "B", url="http://x/?p=1")
+    assert len(n._tasks) == 1  # strong ref held so it can't be GC'd mid-send
+    await asyncio.sleep(0.02)
+    assert len(calls) == 1 and calls[0]["title"] == "T"
+    assert n._tasks == set()  # discarded on completion
+
+
 @pytest.mark.asyncio
 async def test_push_swallows_errors(settings, monkeypatch):
     def boom(*a, **k):
