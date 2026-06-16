@@ -9,6 +9,7 @@ import type {
   MessagesResponse,
   NormalizedMessage,
   Plan,
+  Policy,
   Project,
   PermissionRequest,
   ProjectUpdate,
@@ -215,6 +216,15 @@ export const api = {
       `/api/projects/${encodeURIComponent(pid)}/reviews/${encodeURIComponent(rid)}/approve`,
       { method: "POST", body: JSON.stringify({ notes: notes ?? null }) },
     ),
+
+  projectPolicy: (pid: string) =>
+    request<Policy>(`/api/projects/${encodeURIComponent(pid)}/policy`),
+
+  putProjectPolicy: (pid: string, policy: Partial<Policy>) =>
+    request<Policy>(`/api/projects/${encodeURIComponent(pid)}/policy`, {
+      method: "PUT",
+      body: JSON.stringify(policy),
+    }),
 
   rejectReview: (pid: string, rid: string, notes?: string) =>
     request<ReviewRequest>(

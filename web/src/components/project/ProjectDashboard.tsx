@@ -19,6 +19,11 @@ export function ProjectDashboard({ pid }: { pid: string }) {
     queryFn: () => api.projectSpec(pid),
     retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 2,
   });
+  const policyQ = useQuery({
+    queryKey: ["policy", pid],
+    queryFn: () => api.projectPolicy(pid),
+    retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 2,
+  });
   const select = useAppStore((s) => s.select);
   const statuses = useAppStore((s) => s.sessionStatuses);
 
@@ -54,7 +59,19 @@ export function ProjectDashboard({ pid }: { pid: string }) {
               ${usage.data.total_cost_usd.toFixed(2)}
             </span>
           )}
-          {project.review_mode && (
+          {policyQ.data ? (
+            <span
+              className={clsx(
+                "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                policyQ.data.profile === "permissive" && "bg-amber-500/20 text-amber-300",
+                policyQ.data.profile === "balanced" && "bg-blue-500/20 text-blue-300",
+                policyQ.data.profile === "strict" && "bg-emerald-500/20 text-emerald-300",
+                policyQ.data.profile === "custom" && "bg-violet-500/20 text-violet-300",
+              )}
+            >
+              {policyQ.data.profile}
+            </span>
+          ) : project.review_mode ? (
             <span
               className={clsx(
                 "rounded-full px-2 py-0.5 text-[10px] font-medium",
@@ -65,7 +82,7 @@ export function ProjectDashboard({ pid }: { pid: string }) {
             >
               {project.review_mode}
             </span>
-          )}
+          ) : null}
           {project.intent && (
             <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-400">
               {project.intent === "goal" ? "goal-oriented" : "ad-hoc"}

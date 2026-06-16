@@ -585,6 +585,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
           void queryClient.invalidateQueries({ queryKey: ["spec", pid] });
           break;
         }
+        case "policy_updated": {
+          const pid = payload.project_id as string;
+          if (pid) void queryClient.invalidateQueries({ queryKey: ["policy", pid] });
+          else void queryClient.invalidateQueries({ queryKey: ["policy"] });
+          break;
+        }
         case "review_requested":
         case "review_updated": {
           const pid = payload.project_id as string;

@@ -22,7 +22,7 @@ from pathlib import Path
 from claude_agent_sdk import AgentDefinition
 
 from ..models import RoleTemplate
-from ..store import agents_store, project_store, spec_store
+from ..store import agents_store, policy_store, project_store, spec_store
 
 # Tools a non-editing role may use (reviewer/verifier). Edits are reserved for
 # the worker; everything risky still passes the permission broker.
@@ -212,6 +212,85 @@ def _project_goal_section(root: Path) -> str:
     return f"# Project goal\n\n{lead}.\n\nGoal: {goal}"
 
 
+_GATE_DESCRIPTIONS = {
+    "tests_pass": "Run the project's test suite and report pass/fail.",
+    "spec_compliance": "Verify changes are consistent with the living specification.",
+    "diff_budget": "Total diff must not exceed {max_lines} lines. If it does, decompose into smaller steps.",
+    "no_new_deps": "Flag any newly added dependencies for review.",
+    "sensitive_files": "Changes to files matching {patterns} always require human review.",
+    "acceptance_criteria": "Evaluate changes against: {criteria}",
+}
+
+
+def _policy_section(root: Path) -> str:
+    policy = policy_store.resolve_policy(root)
+    parts = [f"# Autonomy policy — {policy['profile']}"]
+
+    if policy["plan_approval"] == "human":
+        parts.append(
+            "## Plan approval: HUMAN REQUIRED\n"
+            "After creating your plan, present it to the user and STOP. Do not implement "
+            "any step until the user explicitly approves the plan."
+        )
+    else:
+        parts.append("## Plan approval: auto\nProceed with implementation after creating your plan.")
+
+    active_gates = []
+    for gate_name, gate_cfg in policy.get("gates", {}).items():
+        if gate_cfg.get("mode", "skip") == "skip":
+            continue
+        desc = _GATE_DESCRIPTIONS.get(gate_name, gate_name)
+        try:
+            desc = desc.format(**gate_cfg)
+        except (KeyError, IndexError):
+            pass
+        mode = gate_cfg["mode"].upper()
+        active_gates.append(f"- **{gate_name}** [{mode}]: {desc}")
+
+    if active_gates:
+        parts.append(
+            "## Quality gates\n"
+            "Before requesting review, run check_gates to see what's required, then "
+            "satisfy each gate and report results with report_gate_results.\n\n"
+            + "\n".join(active_gates)
+        )
+    else:
+        parts.append("## Quality gates\nNo quality gates are active for this project.")
+
+    strategy = policy["review_strategy"]
+    if strategy == "self":
+        parts.append(
+            "## Review: self\n"
+            "Review your own changes against the spec and gate results. "
+            "No external reviewer is needed."
+        )
+    elif strategy == "agent":
+        parts.append(
+            "## Review: agent\n"
+            "Delegate review to the reviewer subagent via the Task tool. "
+            "Include the gate results and verification output."
+        )
+    else:
+        parts.append(
+            "## Review: HUMAN REQUIRED\n"
+            "Submit for manual review with request_review. STOP and wait for "
+            "the human reviewer's feedback before proceeding."
+        )
+
+    if policy["merge_approval"] == "auto":
+        parts.append(
+            "## Merge: auto\n"
+            "After review approval, call merge_branch to merge automatically."
+        )
+    else:
+        parts.append(
+            "## Merge: HUMAN REQUIRED\n"
+            "After review approval, STOP. The human will merge when ready."
+        )
+
+    return "\n\n".join(parts)
+
+
 def assemble_orchestrator(
     root: Path, child_roots: list[Path] | None = None,
 ) -> tuple[dict[str, AgentDefinition], str]:
@@ -250,6 +329,7 @@ def assemble_orchestrator(
         parts.append(goal_section)
     parts.append(PLANNER_INSTRUCTIONS)
     parts.append(BRANCH_WORKFLOW_INSTRUCTIONS)
+    parts.append(_policy_section(root))
 
     # Standing rule for every orchestrator: the spec is a living document.
     # Always injected — including when none exists yet, so the agent is told to

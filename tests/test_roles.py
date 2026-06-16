@@ -1,5 +1,5 @@
 from orchid.claude import roles
-from orchid.store import agents_store, project_store
+from orchid.store import agents_store, policy_store, project_store
 
 
 def test_builtins_shape():
@@ -98,6 +98,32 @@ def test_assemble_children_skips_missing_agents_md(tmp_path):
     child.mkdir()
     _agents, prompt = roles.assemble_orchestrator(tmp_path, child_roots=[child])
     assert "Child project" not in prompt
+
+
+def test_assemble_includes_policy_section(tmp_path):
+    project_store.init_project(tmp_path, "prj_p", "Policied")
+    policy_store.write_policy(tmp_path, policy_store.PRESETS["strict"])
+    _agents, prompt = roles.assemble_orchestrator(tmp_path)
+    assert "Autonomy policy" in prompt
+    assert "strict" in prompt
+    assert "HUMAN REQUIRED" in prompt
+    assert "check_gates" in prompt
+
+
+def test_assemble_default_policy_is_balanced(tmp_path):
+    _agents, prompt = roles.assemble_orchestrator(tmp_path)
+    assert "balanced" in prompt
+    assert "Plan approval: auto" in prompt
+    assert "Review: agent" in prompt
+
+
+def test_assemble_permissive_policy(tmp_path):
+    project_store.init_project(tmp_path, "prj_perm", "Hobby")
+    policy_store.write_policy(tmp_path, policy_store.PRESETS["permissive"])
+    _agents, prompt = roles.assemble_orchestrator(tmp_path)
+    assert "permissive" in prompt
+    assert "Review: self" in prompt
+    assert "Merge: auto" in prompt
 
 
 def test_normalize_overrides_keeps_only_deltas():

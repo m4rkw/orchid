@@ -5,6 +5,7 @@ import type { PermissionMode, Project, ProjectUpdate } from "../../api/types";
 import { queryClient } from "../../state/queryClient";
 import { useAppStore } from "../../state/stores";
 import { AgentRoles } from "./AgentRoles";
+import { PolicyEditor } from "./PolicyEditor";
 
 const MODEL_PRESETS = ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"] as const;
 const PERMISSION_MODES: PermissionMode[] = ["acceptEdits", "default", "plan", "bypassPermissions"];
@@ -153,6 +154,10 @@ export function ProjectSettings({ pid }: { pid: string }) {
             Close
           </button>
         </div>
+      </div>
+
+      <div className="fade-up rounded-xl border border-zinc-800 bg-zinc-900/40 p-6 shadow-xl shadow-black/30">
+        <PolicyEditor pid={pid} />
       </div>
 
       <div className="fade-up rounded-xl border border-zinc-800 bg-zinc-900/40 p-6 shadow-xl shadow-black/30">

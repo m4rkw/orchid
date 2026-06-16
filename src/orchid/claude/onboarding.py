@@ -9,7 +9,7 @@ from claude_agent_sdk import create_sdk_mcp_server, tool
 from ..bus import EventBus
 from ..config import Settings
 from ..services import ApiError, ProjectService
-from ..store import agents_store, project_store, spec_store
+from ..store import agents_store, policy_store, project_store, spec_store
 from ..store.paths import canonicalize
 from . import roles
 from .driver import SessionDriver
@@ -44,10 +44,13 @@ workflow requires git.
    - "Ad-hoc changes" — using sessions for quick, unrelated tasks; no overarching goal
    - "Working towards a goal" — there's a specific end state in mind
    If they pick the goal, ask them to describe it in a sentence or two (free text — no ask_choice).
-9. Ask about review mode — call ask_choice(question, "Manual review,Fully autonomous"):
-   - "Manual review" — they review branches and approve merges themselves
-   - "Fully autonomous" — a reviewer agent automatically reviews and approves changes
-10. Store with set_project_intent. Summarise: "Project set up. Intent: <x>, review: <y>."
+9. Ask about autonomy — call ask_choice(question, "Permissive (auto-ship — hobby/PoC),Balanced (quality gates + agent review),Strict (human approves everything)"):
+   - "Permissive" — auto plan, self-review, auto-merge. Minimal quality gates.
+   - "Balanced" — auto plan, agent review with quality gates, auto-merge on approval.
+   - "Strict" — human approves plan, human reviews, human merges. All gates required.
+   Call set_autonomy_profile with the chosen profile name (permissive/balanced/strict).
+10. Store with set_project_intent (use review_mode="autonomous" for permissive/balanced, \
+"manual" for strict). Summarise: "Project set up. Intent: <x>, autonomy: <profile>."
 
 When creating a project from scratch:
 1. Ask what they want to build — gather enough to pick a language/framework and structure.
@@ -313,6 +316,26 @@ def build_onboarding_tools(service: ProjectService, bus: EventBus) -> list[Any]:
             return _text(f"Error: {exc}")
 
     @tool(
+        "set_autonomy_profile",
+        "Set the project's autonomy profile. profile='permissive' (hobby/PoC — auto-ship), "
+        "'balanced' (quality gates + agent review), or 'strict' (human approves everything).",
+        {"path": str, "profile": str},
+    )
+    async def set_autonomy_profile(args: dict[str, Any]) -> dict[str, Any]:
+        try:
+            root = canonicalize(args["path"])
+            profile = (args.get("profile") or "").strip().lower()
+            if profile not in policy_store.PRESETS:
+                return _text(f"Error: profile must be one of {list(policy_store.PRESETS)}, got {profile!r}.")
+            from datetime import datetime as _dt, timezone as _tz
+            policy = {**policy_store.PRESETS[profile], "updated_at": _dt.now(_tz.utc).isoformat()}
+            policy_store.write_policy(root, policy)
+            bus.publish("sidebar", "policy_updated", {"project_id": None})
+            return _text(f"Autonomy profile set to '{profile}'.")
+        except OSError as exc:
+            return _text(f"Error: {exc}")
+
+    @tool(
         "scaffold_project",
         "Create a new project directory, init git, and register it with Orchid. "
         "Use for brand-new projects or meta-project roots.",
@@ -452,7 +475,7 @@ def build_onboarding_tools(service: ProjectService, bus: EventBus) -> list[Any]:
         return _text(f"Wrote specification v{version} ({len(content)} chars).")
 
     return [list_directory, inspect_directory, register_project, write_agents_md,
-            assign_roles, git_init, ask_choice, set_project_intent,
+            assign_roles, git_init, ask_choice, set_project_intent, set_autonomy_profile,
             scaffold_project, add_child_project, remove_child_project, write_spec]
 
 
@@ -478,6 +501,7 @@ def build_onboarding_driver(
                 "mcp__orchid__git_init",
                 "mcp__orchid__ask_choice",
                 "mcp__orchid__set_project_intent",
+                "mcp__orchid__set_autonomy_profile",
                 "mcp__orchid__scaffold_project",
                 "mcp__orchid__add_child_project",
                 "mcp__orchid__remove_child_project",

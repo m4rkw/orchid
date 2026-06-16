@@ -259,6 +259,26 @@ export type SpecUpdatedEvent = {
   spec: Spec;
 };
 
+export type PolicyProfile = "permissive" | "balanced" | "strict" | "custom";
+export type GateMode = "required" | "optional" | "skip";
+
+export type GateConfig = {
+  mode: GateMode;
+  max_lines?: number;
+  patterns?: string[];
+  criteria?: string;
+};
+
+export type Policy = {
+  version: number;
+  profile: PolicyProfile;
+  plan_approval: "auto" | "human";
+  review_strategy: "agent" | "human" | "self";
+  merge_approval: "auto" | "human";
+  gates: Record<string, GateConfig>;
+  updated_at: string | null;
+};
+
 export type ReviewStatus = "pending" | "approved" | "changes_requested" | "merged";
 
 export type ReviewRequest = {

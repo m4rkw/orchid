@@ -97,12 +97,12 @@ async def test_request_review_warns_without_verification(harness):
 
 
 def test_test_path_heuristic():
-    from orchid.api.reviews import _TEST_PATH_RE
+    from orchid.git_ops import touches_tests
     for p in ["tests/test_x.py", "src/foo_test.go", "a/b.test.ts",
               "spec/thing_spec.rb", "conftest.py", "pkg/spec/helper.js"]:
-        assert _TEST_PATH_RE.search(p), f"should match: {p}"
+        assert touches_tests([p]), f"should match: {p}"
     for p in ["src/main.py", "README.md", "lib/contest.py", "specimen.py"]:
-        assert not _TEST_PATH_RE.search(p), f"should NOT match: {p}"
+        assert not touches_tests([p]), f"should NOT match: {p}"
 
 
 @pytest.mark.anyio
