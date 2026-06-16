@@ -21,6 +21,7 @@ from .git_tools import GIT_SERVER, GIT_TOOL_NAMES, build_git_server
 from .planning import PLAN_SERVER, PLAN_TOOL_NAMES, build_plan_server
 from .runner import Runner, RunnerSpec
 from .spec_tools import SPEC_SERVER, SPEC_TOOL_NAMES, build_spec_server
+from .architecture_tools import ARCH_SERVER, ARCH_TOOL_NAMES, build_architecture_server
 from .transcript import TranscriptCache, _preview
 
 log = logging.getLogger(__name__)
@@ -262,12 +263,14 @@ class DriverManager:
         plan_server = build_plan_server(root, project["id"], self._bus)
         git_server = build_git_server(root, project["id"], self._bus, notifier=self._notifier)
         spec_server = build_spec_server(root, project["id"], self._bus)
+        arch_server = build_architecture_server(root, project["id"], self._bus)
         driver = self._build_driver(
             root, project["id"], session_id=None,
             system_prompt={"type": "preset", "preset": "claude_code", "append": append},
             agents=agents,
-            mcp_servers={PLAN_SERVER: plan_server, GIT_SERVER: git_server, SPEC_SERVER: spec_server},
-            allowed_tools=PLAN_TOOL_NAMES + GIT_TOOL_NAMES + SPEC_TOOL_NAMES,
+            mcp_servers={PLAN_SERVER: plan_server, GIT_SERVER: git_server,
+                         SPEC_SERVER: spec_server, ARCH_SERVER: arch_server},
+            allowed_tools=PLAN_TOOL_NAMES + GIT_TOOL_NAMES + SPEC_TOOL_NAMES + ARCH_TOOL_NAMES,
             consult=True,
         )
         await driver.prompt(prompt)

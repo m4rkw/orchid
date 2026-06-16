@@ -67,6 +67,24 @@ def test_assemble_embeds_spec_when_present(tmp_path):
     assert "Build a thing." in prompt
 
 
+def test_assemble_architecture_rule_precedes_spec(tmp_path):
+    # The architecture rule is always present and comes BEFORE the spec rule.
+    _agents, prompt = roles.assemble_orchestrator(tmp_path)
+    assert "living architecture definition" in prompt and "update_architecture" in prompt
+    # Unambiguous markers (the policy section also mentions "the living specification").
+    assert prompt.index("get_architecture / ") < prompt.index("living specification (get_spec")
+    assert "Project architecture (v" not in prompt  # none on disk yet
+
+
+def test_assemble_embeds_architecture_when_present(tmp_path):
+    from orchid.store import architecture_store
+    architecture_store.write_architecture(tmp_path, {
+        "version": 2, "title": "A", "content": "Layered services.", "status": "active",
+    })
+    _agents, prompt = roles.assemble_orchestrator(tmp_path)
+    assert "Project architecture (v2)" in prompt and "Layered services." in prompt
+
+
 def test_overrides_disable_and_edit(tmp_path):
     agents_store.write_agent_overrides(
         tmp_path, {"worker": {"enabled": False}, "verifier": {"model": "claude-haiku-4-5"}}

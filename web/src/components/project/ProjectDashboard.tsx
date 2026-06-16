@@ -136,6 +136,13 @@ export function ProjectDashboard({ pid }: { pid: string }) {
           </button>
           <button
             type="button"
+            onClick={() => select({ pid, architecture: true })}
+            className="rounded-md bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700"
+          >
+            Architecture
+          </button>
+          <button
+            type="button"
             onClick={() => select({ pid, spec: true })}
             className="rounded-md bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700"
           >

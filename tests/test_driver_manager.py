@@ -122,7 +122,11 @@ async def test_create_orchestrator_session_wires_roles_and_plan_tools(harness):
     assert spec.mcp_servers and "orchid_spec" in spec.mcp_servers
     from orchid.claude.git_tools import GIT_TOOL_NAMES
     from orchid.claude.spec_tools import SPEC_TOOL_NAMES
-    assert spec.allowed_tools == PLAN_TOOL_NAMES + GIT_TOOL_NAMES + SPEC_TOOL_NAMES + CONSULT_TOOL_NAMES
+    from orchid.claude.architecture_tools import ARCH_TOOL_NAMES
+    assert spec.allowed_tools == (
+        PLAN_TOOL_NAMES + GIT_TOOL_NAMES + SPEC_TOOL_NAMES + ARCH_TOOL_NAMES + CONSULT_TOOL_NAMES
+    )
+    assert spec.mcp_servers and "orchid_architecture" in spec.mcp_servers
     sp = spec.system_prompt
     assert sp["type"] == "preset" and sp["preset"] == "claude_code"
     assert "orchestrator for this project" in sp["append"]

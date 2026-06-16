@@ -19,6 +19,7 @@ import type {
   RoleTemplate,
   SessionDetail,
   SessionSummary,
+  Architecture,
   Spec,
 } from "./types";
 
@@ -194,6 +195,15 @@ export const api = {
 
   putProjectSpec: (pid: string, content: string, title?: string) =>
     request<Spec>(`/api/projects/${encodeURIComponent(pid)}/spec`, {
+      method: "PUT",
+      body: JSON.stringify(title !== undefined ? { content, title } : { content }),
+    }),
+
+  projectArchitecture: (pid: string) =>
+    request<Architecture>(`/api/projects/${encodeURIComponent(pid)}/architecture`),
+
+  putProjectArchitecture: (pid: string, content: string, title?: string) =>
+    request<Architecture>(`/api/projects/${encodeURIComponent(pid)}/architecture`, {
       method: "PUT",
       body: JSON.stringify(title !== undefined ? { content, title } : { content }),
     }),

@@ -9,7 +9,7 @@ from claude_agent_sdk import create_sdk_mcp_server, tool
 from ..bus import EventBus
 from ..config import Settings
 from ..services import ApiError, ProjectService
-from ..store import agents_store, policy_store, project_store, spec_store
+from ..store import agents_store, architecture_store, policy_store, project_store, spec_store
 from ..store.paths import canonicalize
 from . import roles
 from .driver import SessionDriver
@@ -32,24 +32,28 @@ AGENTS.md and ask the user to confirm or correct it.
 5. Only after explicit confirmation: call register_project, then write_agents_md with the agreed \
 content, then assign_roles (default: orchestrator, worker, reviewer, verifier — unless the user \
 wants different).
-6. Living specification: look for an existing spec file (SPEC.md, spec.md, specification.md, or \
+6. Living architecture: infer HOW the system is built from the code you read — its structure, main \
+components, boundaries, data flow, key dependencies and design decisions. Draft a concise \
+architecture definition. The architecture precedes and informs the spec, so do this first. Show it \
+and ask for confirmation, then call write_architecture. It can be edited later in the UI or by agents.
+7. Living specification: look for an existing spec file (SPEC.md, spec.md, specification.md, or \
 similar) in the project root. If found, read it and propose importing it as the project's living \
-spec. If not found, draft a concise specification based on what you learned about the project — \
-it should describe what the project does, its key features/behaviours, and acceptance criteria or \
-constraints that agents should verify against. Show the proposed spec and ask for confirmation. \
-After confirmation, call write_spec. The spec can always be edited later in the UI or by agents.
-7. Check for a .git directory. If missing, offer to initialise one with git_init — Orchid's branch \
+spec. If not found, draft a concise specification, derived from and consistent with the \
+architecture — it should describe what the project does, its key features/behaviours, and \
+acceptance criteria or constraints that agents should verify against. Show the proposed spec and \
+ask for confirmation. After confirmation, call write_spec. It can be edited later in the UI or by agents.
+8. Check for a .git directory. If missing, offer to initialise one with git_init — Orchid's branch \
 workflow requires git.
-8. Ask about their intent — call ask_choice(question, "Ad-hoc changes,Working towards a goal"):
+9. Ask about their intent — call ask_choice(question, "Ad-hoc changes,Working towards a goal"):
    - "Ad-hoc changes" — using sessions for quick, unrelated tasks; no overarching goal
    - "Working towards a goal" — there's a specific end state in mind
    If they pick the goal, ask them to describe it in a sentence or two (free text — no ask_choice).
-9. Ask about autonomy — call ask_choice(question, "Permissive (auto-ship — hobby/PoC),Balanced (quality gates + agent review),Strict (human approves everything)"):
+10. Ask about autonomy — call ask_choice(question, "Permissive (auto-ship — hobby/PoC),Balanced (quality gates + agent review),Strict (human approves everything)"):
    - "Permissive" — auto plan, self-review, auto-merge. Minimal quality gates.
    - "Balanced" — auto plan, agent review with quality gates, auto-merge on approval.
    - "Strict" — human approves plan, human reviews, human merges. All gates required.
    Call set_autonomy_profile with the chosen profile name (permissive/balanced/strict).
-10. Store with set_project_intent (use review_mode="autonomous" for permissive/balanced, \
+11. Store with set_project_intent (use review_mode="autonomous" for permissive/balanced, \
 "manual" for strict). Summarise: "Project set up. Intent: <x>, autonomy: <profile>."
 
 When creating a project from scratch:
@@ -433,6 +437,49 @@ def build_onboarding_tools(service: ProjectService, bus: EventBus) -> list[Any]:
             return _text(f"Error: {exc}")
 
     @tool(
+        "write_architecture",
+        "Write (or overwrite) the project's living architecture definition — how the system is "
+        "built (structure, components, boundaries, key decisions). Infer it from the codebase "
+        "during analysis; it precedes and informs the spec. Content is markdown. Call only after "
+        "the user has approved it.",
+        {"path": str, "title": str, "content": str},
+    )
+    async def write_architecture(args: dict[str, Any]) -> dict[str, Any]:
+        try:
+            root = canonicalize(args["path"])
+            if not root.is_dir():
+                return _text(f"Error: {root} is not a directory.")
+            content = (args.get("content") or "").strip()
+            if not content:
+                return _text("Error: architecture content is required.")
+            from datetime import datetime as _dt, timezone as _tz
+            now = _dt.now(_tz.utc).isoformat()
+            existing = architecture_store.read_architecture(root)
+            if existing:
+                existing["content"] = content
+                existing["version"] = existing.get("version", 0) + 1
+                existing["updated_at"] = now
+                if args.get("title"):
+                    existing["title"] = args["title"]
+                architecture_store.write_architecture(root, existing)
+                version = existing["version"]
+            else:
+                arch = {
+                    "version": 1,
+                    "title": args.get("title") or "Architecture",
+                    "content": content,
+                    "status": "active",
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                architecture_store.write_architecture(root, arch)
+                version = 1
+            bus.publish("onboarding", "architecture_written", {"path": str(root)})
+        except OSError as exc:
+            return _text(f"Error writing architecture: {exc}")
+        return _text(f"Wrote architecture v{version} ({len(content)} chars).")
+
+    @tool(
         "write_spec",
         "Write (or overwrite) the project's living specification — the canonical reference all "
         "agents verify their work against. Content is markdown. Call only after the user has "
@@ -476,7 +523,8 @@ def build_onboarding_tools(service: ProjectService, bus: EventBus) -> list[Any]:
 
     return [list_directory, inspect_directory, register_project, write_agents_md,
             assign_roles, git_init, ask_choice, set_project_intent, set_autonomy_profile,
-            scaffold_project, add_child_project, remove_child_project, write_spec]
+            scaffold_project, add_child_project, remove_child_project,
+            write_architecture, write_spec]
 
 
 def build_onboarding_driver(
@@ -505,6 +553,7 @@ def build_onboarding_driver(
                 "mcp__orchid__scaffold_project",
                 "mcp__orchid__add_child_project",
                 "mcp__orchid__remove_child_project",
+                "mcp__orchid__write_architecture",
                 "mcp__orchid__write_spec",
             ],
             disallowed_tools=["Bash", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch", "Task", "AskUserQuestion"],

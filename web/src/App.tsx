@@ -10,6 +10,7 @@ import { PlansView } from "./components/project/PlansView";
 import { ProjectSettings } from "./components/project/ProjectSettings";
 import { ReviewPanel } from "./components/project/ReviewPanel";
 import { SpecView } from "./components/project/SpecView";
+import { ArchitectureView } from "./components/project/ArchitectureView";
 import { NewSessionComposer } from "./components/session/NewSessionComposer";
 import { SessionView } from "./components/session/SessionView";
 import { ProjectTree } from "./components/tree/ProjectTree";
@@ -104,6 +105,8 @@ export default function App() {
             <PlansView key={`plans-${selected.pid}`} pid={selected.pid} />
           ) : isProjectSel(selected) && selected.reviews ? (
             <ReviewPanel key={`reviews-${selected.pid}-${selected.reviewId ?? ""}`} pid={selected.pid} />
+          ) : isProjectSel(selected) && selected.architecture ? (
+            <ArchitectureView key={`arch-${selected.pid}`} pid={selected.pid} />
           ) : isProjectSel(selected) && selected.spec ? (
             <SpecView key={`spec-${selected.pid}`} pid={selected.pid} />
           ) : isProjectSel(selected) && selected.compose ? (

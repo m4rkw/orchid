@@ -259,6 +259,21 @@ export type SpecUpdatedEvent = {
   spec: Spec;
 };
 
+/** The living architecture definition — how the system is built; precedes and informs the spec. */
+export type Architecture = {
+  version: number;
+  title: string;
+  content: string;
+  status: "active" | "archived";
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type ArchitectureUpdatedEvent = {
+  project_id: string;
+  architecture: Architecture;
+};
+
 export type PolicyProfile = "permissive" | "balanced" | "strict" | "custom";
 export type GateMode = "required" | "optional" | "skip";
 

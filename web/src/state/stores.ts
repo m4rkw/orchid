@@ -15,7 +15,7 @@ import { api } from "../api/client";
 import { notify } from "../notify";
 import { queryClient } from "./queryClient";
 
-export type ProjectSelection = { pid: string; sid?: string; compose?: boolean; settings?: boolean; plans?: boolean; reviews?: boolean; reviewId?: string; spec?: boolean; drillAgentId?: string };
+export type ProjectSelection = { pid: string; sid?: string; compose?: boolean; settings?: boolean; plans?: boolean; reviews?: boolean; reviewId?: string; spec?: boolean; architecture?: boolean; drillAgentId?: string };
 export type CollabSelection = { collab: string };
 export type NewCollabSelection = { newCollab: true };
 export type Selection = ProjectSelection | CollabSelection | NewCollabSelection | null;
@@ -583,6 +583,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
         case "spec_updated": {
           const pid = payload.project_id as string;
           void queryClient.invalidateQueries({ queryKey: ["spec", pid] });
+          break;
+        }
+        case "architecture_updated": {
+          const pid = payload.project_id as string;
+          void queryClient.invalidateQueries({ queryKey: ["architecture", pid] });
           break;
         }
         case "policy_updated": {

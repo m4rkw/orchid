@@ -22,7 +22,7 @@ from pathlib import Path
 from claude_agent_sdk import AgentDefinition
 
 from ..models import RoleTemplate
-from ..store import agents_store, policy_store, project_store, spec_store
+from ..store import agents_store, architecture_store, policy_store, project_store, spec_store
 
 # Tools a non-editing role may use (reviewer/verifier). Edits are reserved for
 # the worker; everything risky still passes the permission broker.
@@ -143,6 +143,16 @@ PLANNER_INSTRUCTIONS = (
     "give each step a clear title and the role(s) it needs, and update step status as you go. "
     "When asked to implement a specific step, first re-read the plan (list_plans / get_plan), "
     "delegate to the relevant subagent(s), have the verifier confirm, then update the step."
+)
+
+ARCHITECTURE_INSTRUCTIONS = (
+    "Every Orchid project has a living architecture definition (get_architecture / "
+    "update_architecture) — the foundational document for HOW the system is built (structure, "
+    "components, boundaries, key decisions). It precedes and informs the specification, so read it "
+    "before changing structure. Keeping it current is a standing rule, not optional: if none exists "
+    "yet, create one when you begin real work; and whenever you change the system's structure — new "
+    "components, moved boundaries, changed data flow or dependencies — update the architecture "
+    "BEFORE the spec, then keep the spec consistent with it."
 )
 
 SPEC_INSTRUCTIONS = (
@@ -331,9 +341,17 @@ def assemble_orchestrator(
     parts.append(BRANCH_WORKFLOW_INSTRUCTIONS)
     parts.append(_policy_section(root))
 
-    # Standing rule for every orchestrator: the spec is a living document.
-    # Always injected — including when none exists yet, so the agent is told to
-    # create and maintain one rather than leaving the project specless.
+    # Standing rule for every orchestrator: architecture and spec are living
+    # documents, always injected (even when none exists yet, so the agent is told
+    # to create them). The architecture comes BEFORE and informs the spec.
+    parts.append(ARCHITECTURE_INSTRUCTIONS)
+    arch = architecture_store.read_architecture(root)
+    if arch:
+        parts.append(
+            f"# Project architecture (v{arch.get('version', 1)})\n\n"
+            f"{arch['content']}"
+        )
+
     parts.append(SPEC_INSTRUCTIONS)
     spec = spec_store.read_spec(root)
     if spec:
