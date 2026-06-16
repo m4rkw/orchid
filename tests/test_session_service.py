@@ -93,14 +93,13 @@ async def test_detail_includes_handoff(harness):
     assert detail.status == "idle"  # 2h old
 
 
-async def test_messages_load_once_and_seq(harness):
+async def test_messages_and_seq(harness):
     service, bus, calls, _root = harness
     out = await service.messages(SID)
     assert [m["uuid"] for m in out["messages"]] == ["u0", "u1", "u2"]
     assert out["seq"] == 0
-    first_reads = calls["messages"]
-    await service.messages(SID)
-    assert calls["messages"] == first_reads  # cache hit, no disk re-read
+    out2 = await service.messages(SID)
+    assert [m["uuid"] for m in out2["messages"]] == ["u0", "u1", "u2"]
     bus.publish(f"session:{SID}", "message", {})
     assert (await service.messages(SID))["seq"] == 1
 

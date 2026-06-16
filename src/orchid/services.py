@@ -253,8 +253,7 @@ class SessionService:
 
     async def messages(self, session_id: str) -> dict[str, Any]:
         entry, _info = await self.locate(session_id)
-        if self._cache.get(session_id) is None:
-            await self._load_cache(session_id, Path(entry["root"]))
+        await self._load_cache(session_id, Path(entry["root"]))
         return {
             "messages": [m.model_dump() for m in self._cache.get(session_id) or []],
             "seq": self._bus.current_seq(f"session:{session_id}"),

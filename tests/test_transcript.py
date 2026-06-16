@@ -48,14 +48,18 @@ def test_assistant_blocks():
     assert "file_path" in nm.blocks[2].input_preview
 
 
-def test_user_prompt_echo_skipped_but_tool_results_kept():
-    assert normalize_stream_message(UserMessage(content="hi")) is None
-    nm = normalize_stream_message(
+def test_user_prompt_included_and_tool_results_kept():
+    nm = normalize_stream_message(UserMessage(content="hi"))
+    assert nm is not None and nm.role == "user"
+    assert nm.blocks[0].type == "text"
+    assert nm.blocks[0].text == "hi"
+    assert normalize_stream_message(UserMessage(content="")) is None
+    nm2 = normalize_stream_message(
         UserMessage(content=[ToolResultBlock(tool_use_id="tu1", content="out", is_error=False)])
     )
-    assert nm is not None and nm.role == "user"
-    assert nm.blocks[0].type == "tool_result"
-    assert nm.blocks[0].content_preview == "out"
+    assert nm2 is not None and nm2.role == "user"
+    assert nm2.blocks[0].type == "tool_result"
+    assert nm2.blocks[0].content_preview == "out"
 
 
 def test_tool_result_list_content_flattened():

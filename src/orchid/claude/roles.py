@@ -146,10 +146,12 @@ PLANNER_INSTRUCTIONS = (
 )
 
 SPEC_INSTRUCTIONS = (
-    "This project has a living specification (get_spec / update_spec). The spec is the canonical "
-    "reference for what the project should do — verify your work against it. When you add features, "
-    "change behaviour, or modify requirements, update the spec to reflect the change BEFORE "
-    "submitting for review. The spec must always describe the current intended state of the project."
+    "Every Orchid project has a living specification (get_spec / update_spec) — the canonical "
+    "reference for what the project should do. Keeping it current is a standing rule, not optional: "
+    "if no spec exists yet, create one with update_spec when you begin real work; verify your work "
+    "against it; and whenever you add a feature, change behaviour, or modify requirements, update "
+    "the spec to reflect the new intended state BEFORE submitting for review. The spec must always "
+    "describe the current intended behaviour of the project."
 )
 
 
@@ -249,9 +251,12 @@ def assemble_orchestrator(
     parts.append(PLANNER_INSTRUCTIONS)
     parts.append(BRANCH_WORKFLOW_INSTRUCTIONS)
 
+    # Standing rule for every orchestrator: the spec is a living document.
+    # Always injected — including when none exists yet, so the agent is told to
+    # create and maintain one rather than leaving the project specless.
+    parts.append(SPEC_INSTRUCTIONS)
     spec = spec_store.read_spec(root)
     if spec:
-        parts.append(SPEC_INSTRUCTIONS)
         parts.append(
             f"# Project specification (v{spec.get('version', 1)})\n\n"
             f"{spec['content']}"

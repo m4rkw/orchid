@@ -71,21 +71,24 @@ def normalize_stream_message(msg: Any, cap: int = PREVIEW_CAP) -> NormalizedMess
         )
 
     if isinstance(msg, UserMessage):
+        blocks: list[Block] = []
         if isinstance(msg.content, str):
-            return None  # prompt echo; the UI renders user prompts locally
-        blocks = []
-        for b in msg.content:
-            if isinstance(b, ToolResultBlock):
-                preview, truncated = _preview(_result_content_text(b.content), cap)
-                blocks.append(
-                    Block(
-                        type="tool_result",
-                        tool_use_id=b.tool_use_id,
-                        content_preview=preview,
-                        is_error=bool(b.is_error),
-                        truncated=truncated,
+            if msg.content:
+                text, truncated = _preview(msg.content, cap)
+                blocks.append(Block(type="text", text=text, truncated=truncated))
+        else:
+            for b in msg.content:
+                if isinstance(b, ToolResultBlock):
+                    preview, truncated = _preview(_result_content_text(b.content), cap)
+                    blocks.append(
+                        Block(
+                            type="tool_result",
+                            tool_use_id=b.tool_use_id,
+                            content_preview=preview,
+                            is_error=bool(b.is_error),
+                            truncated=truncated,
+                        )
                     )
-                )
         if not blocks:
             return None
         return NormalizedMessage(uuid=msg.uuid or _new_uuid(), role="user", agent_id=None, blocks=blocks)

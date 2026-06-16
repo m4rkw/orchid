@@ -48,6 +48,25 @@ def test_assemble_no_goal_section_when_unset(tmp_path):
     assert "Project goal" not in prompt
 
 
+def test_assemble_always_states_spec_rule(tmp_path):
+    # Standing rule for every orchestrator: even with no spec on disk, the agent
+    # is told the spec is a living document it must create and maintain.
+    _agents, prompt = roles.assemble_orchestrator(tmp_path)
+    assert "living specification" in prompt and "update_spec" in prompt
+    assert "Project specification (v" not in prompt  # no spec content embedded yet
+
+
+def test_assemble_embeds_spec_when_present(tmp_path):
+    from orchid.store import spec_store
+    spec_store.write_spec(tmp_path, {
+        "version": 3, "title": "S", "content": "Build a thing.", "status": "active",
+    })
+    _agents, prompt = roles.assemble_orchestrator(tmp_path)
+    assert "living specification" in prompt          # rule still present
+    assert "Project specification (v3)" in prompt    # content embedded
+    assert "Build a thing." in prompt
+
+
 def test_overrides_disable_and_edit(tmp_path):
     agents_store.write_agent_overrides(
         tmp_path, {"worker": {"enabled": False}, "verifier": {"model": "claude-haiku-4-5"}}
