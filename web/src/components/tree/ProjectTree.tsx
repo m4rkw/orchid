@@ -266,11 +266,19 @@ function ProjectRow({
   };
 
   const selected = useAppStore((s) => s.selected);
-  const isDashboard = isProjectSel(selected) && selected.pid === project.id && !selected.sid && !selected.settings && !selected.plans && !selected.reviews && !selected.compose;
+  const isDashboard = isProjectSel(selected) && selected.pid === project.id && !selected.sid && !selected.settings && !selected.plans && !selected.reviews && !selected.spec && !selected.architecture && !selected.compose;
+  const openProject = () => {
+    useAppStore.getState().select({ pid: project.id });
+    if (!expanded) onToggle();
+  };
 
   return (
     <div>
       <div
+        role="button"
+        tabIndex={0}
+        onClick={openProject}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openProject(); } }}
         className={clsx(
           "group relative flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 select-none hover:bg-zinc-900 focus-visible:ring-2 focus-visible:ring-violet-500/40 focus-visible:outline-none",
           project.missing && "opacity-50",
@@ -280,9 +288,9 @@ function ProjectRow({
       >
         <button
           type="button"
-          tabIndex={0}
+          tabIndex={-1}
           aria-label={expanded ? "Collapse" : "Expand"}
-          onClick={onToggle}
+          onClick={(e) => { e.stopPropagation(); onToggle(); }}
           className={clsx(
             "w-3 shrink-0 text-center text-[10px] text-zinc-600 transition-transform duration-150 hover:text-zinc-300",
             expanded && "rotate-90",
@@ -296,15 +304,7 @@ function ProjectRow({
         {isChild && (
           <span title="Child project" className="shrink-0 text-[10px] text-zinc-600">↳</span>
         )}
-        <span
-          role="button"
-          tabIndex={0}
-          onClick={() => { useAppStore.getState().select({ pid: project.id }); if (!expanded) onToggle(); }}
-          onKeyDown={(e) => { if (e.key === "Enter") { useAppStore.getState().select({ pid: project.id }); if (!expanded) onToggle(); } }}
-          className="truncate text-sm text-zinc-200"
-        >
-          {project.name}
-        </span>
+        <span className="truncate text-sm text-zinc-200">{project.name}</span>
         {project.missing && (
           <span title="Project folder is missing" className="shrink-0 text-xs text-amber-400">
             ⚠

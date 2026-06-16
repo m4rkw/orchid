@@ -118,6 +118,14 @@ async def test_open_github_pr_no_remote_returns_none(tmp_path):
     assert await open_github_pr(tmp_path, "br", "summary") is None
 
 
+@pytest.mark.anyio
+async def test_list_open_prs_no_remote_returns_empty(tmp_path):
+    import subprocess
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    from orchid.git_ops import list_open_prs
+    assert await list_open_prs(tmp_path) == []
+
+
 def test_test_path_heuristic():
     from orchid.git_ops import touches_tests
     for p in ["tests/test_x.py", "src/foo_test.go", "a/b.test.ts",

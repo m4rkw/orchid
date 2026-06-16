@@ -4,9 +4,11 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
+from datetime import datetime, timezone
+
 from ..git_ops import (
-    changed_files, find_base_branch, github_pr_state, merge_branch, merge_github_pr,
-    run_git, touches_tests,
+    changed_files, find_base_branch, github_pr_state, list_open_prs, merge_branch,
+    merge_github_pr, run_git, touches_tests,
 )
 from ..services import ApiError, ProjectService
 from ..store import review_store
@@ -21,7 +23,35 @@ def _service(request: Request) -> ProjectService:
 @router.get("/projects/{project_id}/reviews")
 async def list_reviews(request: Request, project_id: str):
     root = Path(_service(request).get_entry(project_id)["root"])
-    return review_store.list_reviews(root)
+    reviews = review_store.list_reviews(root)
+    # Adopt open GitHub PRs that aren't tracked yet (e.g. raised outside Orchid),
+    # so the reviews list reflects every open PR, not just Orchid-created ones.
+    tracked = {r.get("pr_number") for r in reviews if r.get("pr_number")}
+    new = False
+    for pr in await list_open_prs(root):
+        if pr.get("number") in tracked:
+            continue
+        now = datetime.now(timezone.utc).isoformat()
+        record = {
+            "id": review_store.new_review_id(),
+            "project_id": project_id,
+            "branch": pr.get("headRefName", ""),
+            "summary": pr.get("title", "") or pr.get("headRefName", ""),
+            "status": "pending",
+            "reviewer_notes": None,
+            "verification": None,
+            "pr_number": pr.get("number"),
+            "pr_url": pr.get("url"),
+            "adopted": True,
+            "created_at": now,
+        }
+        review_store.write_review(root, record)
+        reviews.append(record)
+        new = True
+    if new:
+        request.app.state.bus.publish(
+            "sidebar", "review_updated", {"project_id": project_id})
+    return reviews
 
 
 @router.get("/projects/{project_id}/reviews/{review_id}")

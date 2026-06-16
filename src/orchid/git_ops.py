@@ -137,6 +137,24 @@ async def merge_github_pr(root: Path, pr_number: int) -> tuple[int, str]:
     return await run(root, "gh", "pr", "merge", str(pr_number), "--merge", "--delete-branch")
 
 
+async def list_open_prs(root: Path) -> list[dict]:
+    """Open GitHub PRs for this repo, or [] when there's no GitHub remote / gh
+    fails. Used to adopt PRs raised outside Orchid into the reviews list."""
+    try:
+        rc, url = await run_git(root, "remote", "get-url", "origin")
+        if rc != 0 or "github" not in url.lower():
+            return []
+        rc, j = await run(root, "gh", "pr", "list", "--state", "open",
+                          "--json", "number,url,title,headRefName")
+        if rc != 0:
+            return []
+        import json
+        data = json.loads(j)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
 async def github_pr_state(root: Path, pr_number: int) -> str | None:
     """OPEN / MERGED / CLOSED, or None if it can't be determined."""
     try:
