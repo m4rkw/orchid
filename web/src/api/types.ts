@@ -309,4 +309,7 @@ export type ReviewRequest = {
   /** Computed server-side on the single-review GET only (absent from the list response). */
   touches_tests?: boolean;
   files_changed?: number;
+  /** Set when the review is backed by a real GitHub PR (repo has a GitHub remote). */
+  pr_number?: number | null;
+  pr_url?: string | null;
 };

@@ -134,6 +134,9 @@ BRANCH_WORKFLOW_INSTRUCTIONS = (
     "When a step is complete and verified, call request_review to submit the branch — pass the "
     "verifier's exact output (test/typecheck/lint command + result) in the `verification` field; "
     "a review submitted without evidence is treated as unverified. "
+    "request_review is the single way to open a review: on a repo with a GitHub remote it opens a "
+    "real PR and tracks it; on others it creates a local-branch review. Do NOT run `gh pr create` "
+    "yourself — that creates a PR Orchid can't see or merge. "
     "Wait for review feedback before proceeding to the next step."
 )
 

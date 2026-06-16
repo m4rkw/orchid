@@ -181,6 +181,16 @@ function ReviewDetail({ pid, review }: { pid: string; review: ReviewRequest }) {
           >
             {review.status.replace("_", " ")}
           </span>
+          {detail.pr_url && (
+            <a
+              href={detail.pr_url}
+              target="_blank"
+              rel="noreferrer"
+              className="shrink-0 rounded-full bg-violet-500/15 px-2 py-0.5 text-[10px] text-violet-300 hover:bg-violet-500/25"
+            >
+              PR{detail.pr_number ? ` #${detail.pr_number}` : ""} ↗
+            </a>
+          )}
         </div>
         <div className="mt-2 text-xs leading-relaxed text-zinc-400">
           <Markdown>{review.summary}</Markdown>

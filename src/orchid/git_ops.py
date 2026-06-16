@@ -90,3 +90,60 @@ async def diff_stat_lines(root: Path, branch: str) -> int:
 
 def touches_tests(files: list[str]) -> bool:
     return any(_TEST_PATH_RE.search(f) for f in files)
+
+
+# -- GitHub PR integration --------------------------------------------------
+# When a repo has a GitHub remote, an Orchid review is backed by a real PR
+# (opened/merged via `gh`) instead of a local-only branch merge, so the two
+# don't diverge. All best-effort: any failure falls back to the local flow.
+
+
+async def run(root: Path, *args: str, timeout: float = 120) -> tuple[int, str]:
+    """Run an arbitrary command (e.g. `gh`, `git push`) and capture output."""
+    proc = await asyncio.create_subprocess_exec(
+        *args, cwd=str(root),
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+    )
+    out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    return proc.returncode, out.decode(errors="replace")
+
+
+async def open_github_pr(root: Path, branch: str, summary: str,
+                         verification: str = "") -> dict | None:
+    """Push `branch` and open (or find) its GitHub PR. Returns {number,url,state}
+    or None when there's no GitHub remote or any step fails."""
+    try:
+        rc, url = await run_git(root, "remote", "get-url", "origin")
+        if rc != 0 or "github" not in url.lower():
+            return None
+        rc, _ = await run(root, "git", "push", "-u", "origin", branch)
+        if rc != 0:
+            return None
+        title = (summary.splitlines()[0] if summary.strip() else branch)[:120]
+        body = summary + (f"\n\n## Verification\n\n{verification}" if verification else "")
+        # rc may be non-zero if a PR already exists; `pr view` resolves it either way.
+        await run(root, "gh", "pr", "create", "--head", branch, "--title", title, "--body", body)
+        rc, j = await run(root, "gh", "pr", "view", branch, "--json", "number,url,state")
+        if rc != 0:
+            return None
+        import json
+        d = json.loads(j)
+        return {"number": d.get("number"), "url": d.get("url"), "state": d.get("state")}
+    except Exception:
+        return None
+
+
+async def merge_github_pr(root: Path, pr_number: int) -> tuple[int, str]:
+    return await run(root, "gh", "pr", "merge", str(pr_number), "--merge", "--delete-branch")
+
+
+async def github_pr_state(root: Path, pr_number: int) -> str | None:
+    """OPEN / MERGED / CLOSED, or None if it can't be determined."""
+    try:
+        rc, j = await run(root, "gh", "pr", "view", str(pr_number), "--json", "state")
+        if rc != 0:
+            return None
+        import json
+        return json.loads(j).get("state")
+    except Exception:
+        return None

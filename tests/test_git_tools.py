@@ -96,6 +96,28 @@ async def test_request_review_warns_without_verification(harness):
     assert review_store.list_reviews(root)[0]["verification"] is None
 
 
+@pytest.mark.anyio
+async def test_request_review_no_remote_is_local(harness):
+    root, bus, tools = harness
+    await tools["create_branch"].handler({"branch_name": "feat/local"})
+    (root / "q.txt").write_text("q\n")
+    await tools["git_commit"].handler({"message": "add q", "paths": "."})
+    out = _text_of(await tools["request_review"].handler(
+        {"branch": "feat/local", "summary": "Add q", "verification": "ok"}))
+    assert "rev_" in out and "Opened PR" not in out  # no GitHub remote -> local review
+    from orchid.store import review_store
+    r = review_store.list_reviews(root)[0]
+    assert r.get("pr_number") is None and r.get("pr_url") is None
+
+
+@pytest.mark.anyio
+async def test_open_github_pr_no_remote_returns_none(tmp_path):
+    import subprocess
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    from orchid.git_ops import open_github_pr
+    assert await open_github_pr(tmp_path, "br", "summary") is None
+
+
 def test_test_path_heuristic():
     from orchid.git_ops import touches_tests
     for p in ["tests/test_x.py", "src/foo_test.go", "a/b.test.ts",

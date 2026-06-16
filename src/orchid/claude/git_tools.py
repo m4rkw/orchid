@@ -12,7 +12,9 @@ from typing import Any
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
 from ..bus import EventBus
-from ..git_ops import changed_files, diff_stat_lines, merge_branch, run_git
+from ..git_ops import (
+    changed_files, diff_stat_lines, merge_branch, merge_github_pr, open_github_pr, run_git,
+)
 from ..store import policy_store, project_store
 
 GIT_SERVER = "orchid_git"
@@ -202,6 +204,10 @@ def build_git_tools(root: Path, project_id: str, bus: EventBus, notifier: Any = 
 
         review_id = "rev_" + __import__("secrets").token_hex(6)
         from ..store import review_store
+        # Single funnel for review: if this repo has a GitHub remote, open (or
+        # find) a real PR and track it on the review, so Orchid reflects the PR
+        # instead of a parallel local-only review. No remote -> local review.
+        pr = await open_github_pr(root, branch, summary, verification)
         review_data: dict[str, Any] = {
             "id": review_id, "project_id": project_id, "branch": branch,
             "summary": summary,
@@ -209,6 +215,8 @@ def build_git_tools(root: Path, project_id: str, bus: EventBus, notifier: Any = 
             "reviewer_notes": None,
             "verification": verification or None,
             "gate_results": gate_results.get(branch),
+            "pr_number": pr["number"] if pr else None,
+            "pr_url": pr["url"] if pr else None,
             "created_at": __import__("datetime").datetime.now(
                 __import__("datetime").timezone.utc).isoformat(),
         }
@@ -217,14 +225,16 @@ def build_git_tools(root: Path, project_id: str, bus: EventBus, notifier: Any = 
             "project_id": project_id, "review_id": review_id,
             "branch": branch, "summary": summary,
             "review_mode": review_mode, "review_strategy": review_strategy,
+            "pr_url": pr["url"] if pr else None,
         })
         if notifier is not None and review_strategy == "human":
             notifier.push_bg(
                 "Orchid — review requested",
                 f"{branch}: {summary}",
-                url=notifier.review_url(project_id, review_id),
-                url_title="Review in Orchid",
+                url=(pr["url"] if pr else notifier.review_url(project_id, review_id)),
+                url_title=("View PR" if pr else "Review in Orchid"),
             )
+        pr_note = f" Opened PR: {pr['url']}." if pr else ""
         warn = "" if verification else (
             " No verification evidence was attached — correctness will be treated as "
             "UNCONFIRMED; run the project's checks and resubmit with the output."
@@ -232,11 +242,11 @@ def build_git_tools(root: Path, project_id: str, bus: EventBus, notifier: Any = 
         if review_strategy == "self":
             return _text(
                 f"Review created (id={review_id}, status=approved). Self-review policy — "
-                f"call merge_branch to merge branch '{branch}'.{warn}"
+                f"call merge_branch to merge branch '{branch}'.{pr_note}{warn}"
             )
         if review_strategy == "agent":
-            return _text(f"Review requested (id={review_id}). The reviewer agent will review branch '{branch}' automatically.{warn}")
-        return _text(f"Review requested (id={review_id}). Waiting for manual review of branch '{branch}'.{warn}")
+            return _text(f"Review requested (id={review_id}). The reviewer agent will review branch '{branch}' automatically.{pr_note}{warn}")
+        return _text(f"Review requested (id={review_id}). Waiting for manual review of branch '{branch}'.{pr_note}{warn}")
 
     @tool("merge_branch",
           "Merge a reviewed branch. Only works when the project's merge_approval policy is 'auto' "
@@ -259,7 +269,10 @@ def build_git_tools(root: Path, project_id: str, bus: EventBus, notifier: Any = 
             return _text(f"Review status is '{review.get('status')}' — cannot merge.", is_error=True)
 
         branch = review.get("branch", "")
-        rc, out = await merge_branch(root, branch)
+        if review.get("pr_number"):
+            rc, out = await merge_github_pr(root, review["pr_number"])
+        else:
+            rc, out = await merge_branch(root, branch)
         if rc != 0:
             return _text(f"Merge failed:\n{out}", is_error=True)
 
@@ -268,7 +281,8 @@ def build_git_tools(root: Path, project_id: str, bus: EventBus, notifier: Any = 
         bus.publish("sidebar", "review_updated", {
             "project_id": project_id, "review": review,
         })
-        return _text(f"Branch '{branch}' merged successfully.")
+        where = f"PR #{review['pr_number']}" if review.get("pr_number") else f"Branch '{branch}'"
+        return _text(f"{where} merged successfully.")
 
     return [
         create_branch, git_status, git_commit, git_diff,

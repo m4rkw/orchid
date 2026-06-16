@@ -4,7 +4,10 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from ..git_ops import changed_files, find_base_branch, merge_branch, run_git, touches_tests
+from ..git_ops import (
+    changed_files, find_base_branch, github_pr_state, merge_branch, merge_github_pr,
+    run_git, touches_tests,
+)
 from ..services import ApiError, ProjectService
 from ..store import review_store
 
@@ -27,6 +30,16 @@ async def get_review(request: Request, project_id: str, review_id: str):
     review = review_store.read_review(root, review_id)
     if review is None:
         raise ApiError("REVIEW_NOT_FOUND", f"no review {review_id}", 404)
+    # Reconcile a PR-backed review with GitHub: if it merged/closed there, resolve
+    # it here so a PR merged outside Orchid doesn't sit forever as "pending".
+    if review.get("status") == "pending" and review.get("pr_number"):
+        state = await github_pr_state(root, review["pr_number"])
+        new_status = {"MERGED": "merged", "CLOSED": "changes_requested"}.get(state or "")
+        if new_status:
+            review["status"] = new_status
+            review_store.write_review(root, review)
+            request.app.state.bus.publish(
+                "sidebar", "review_updated", {"project_id": project_id, "review": review})
     # Enrich (computed on read, never stored, so it always reflects the branch as-is):
     # which files changed, and whether any are tests — the agent can't fake this.
     files = await changed_files(root, review.get("branch", ""))
@@ -69,8 +82,11 @@ async def approve_review(request: Request, project_id: str, review_id: str, body
     if review is None:
         raise ApiError("REVIEW_NOT_FOUND", f"no review {review_id}", 404)
     branch = review.get("branch", "")
-    # Merge the branch
-    rc, out = await merge_branch(root, branch)
+    # PR-backed review merges on GitHub; local-only review merges the local branch.
+    if review.get("pr_number"):
+        rc, out = await merge_github_pr(root, review["pr_number"])
+    else:
+        rc, out = await merge_branch(root, branch)
     if rc != 0:
         raise ApiError("MERGE_FAILED", f"merge failed: {out}", 500)
     review["status"] = "merged"
