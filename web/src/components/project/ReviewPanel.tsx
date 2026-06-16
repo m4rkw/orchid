@@ -148,6 +148,11 @@ function ReviewDetail({ pid, review }: { pid: string; review: ReviewRequest }) {
   const detail = full.data ?? review;
   const [notes, setNotes] = useState("");
 
+  const verify = useMutation({
+    mutationFn: () => api.verifyReview(pid, review.id),
+    onSuccess: (data) => queryClient.setQueryData(["review", pid, review.id], data),
+  });
+
   const approve = useMutation({
     mutationFn: () => api.approveReview(pid, review.id, notes || undefined),
     onSuccess: () => {
@@ -209,7 +214,7 @@ function ReviewDetail({ pid, review }: { pid: string; review: ReviewRequest }) {
         </div>
       )}
 
-      {/* Verification evidence — approve against observed output, not a claim. */}
+      {/* Verification — observed evidence: CI checks and/or attached/run output. */}
       <div className="mb-4">
         <div className="mb-1 flex items-center gap-2 text-[10px] font-medium tracking-wider text-zinc-500 uppercase">
           Verification
@@ -218,15 +223,45 @@ function ReviewDetail({ pid, review }: { pid: string; review: ReviewRequest }) {
               ⚠ modifies tests — confirm not weakened
             </span>
           )}
+          <button
+            type="button"
+            onClick={() => verify.mutate()}
+            disabled={verify.isPending}
+            className="ml-auto rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] normal-case text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-50"
+          >
+            {verify.isPending ? "Running…" : "Run checks"}
+          </button>
         </div>
+        {detail.ci && (
+          <div
+            className={clsx(
+              "mb-2 rounded border px-3 py-2 text-xs",
+              detail.ci.state === "passed" && "border-emerald-500/30 bg-emerald-500/5 text-emerald-300",
+              detail.ci.state === "failed" && "border-red-500/30 bg-red-500/5 text-red-300",
+              detail.ci.state === "pending" && "border-amber-500/30 bg-amber-500/5 text-amber-300",
+            )}
+          >
+            <div className="font-medium">
+              CI: {detail.ci.passed} passed · {detail.ci.failed} failed · {detail.ci.pending} pending
+            </div>
+            <div className="mt-1 font-mono text-[11px] leading-5 whitespace-pre-wrap">
+              {detail.ci.lines.join("\n")}
+            </div>
+          </div>
+        )}
         {detail.verification ? (
           <pre className="max-h-48 overflow-auto rounded border border-zinc-800 bg-ink-950 px-3 py-2 font-mono text-[11px] leading-5 whitespace-pre-wrap text-zinc-300">
             {detail.verification}
           </pre>
-        ) : (
+        ) : !detail.ci ? (
           <div className="rounded border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-300">
-            ⚠ No verification evidence attached — correctness is unconfirmed. Scrutinize accordingly.
+            ⚠ No verification evidence — run the checks (or attach test output). Correctness unconfirmed.
           </div>
+        ) : null}
+        {verify.isError && (
+          <p className="mt-1 text-xs text-red-400">
+            {verify.error instanceof Error ? verify.error.message : "Failed to run checks"}
+          </p>
         )}
       </div>
 

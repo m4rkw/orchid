@@ -23,6 +23,7 @@ class CreateProjectBody(BaseModel):
 class ProjectSettingsPatch(BaseModel):
     model: str | None = None
     permission_mode: str | None = None
+    test_command: str | None = None
 
 
 class PatchProjectBody(BaseModel):

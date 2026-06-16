@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -6,9 +7,34 @@ from .jsonio import atomic_write_json, load_json
 
 ORCHID_DIRNAME = ".orchid"
 
+# Heuristic to lift a documented test command out of AGENTS.md (in backticks).
+_TEST_CMD_RE = re.compile(
+    r"`([^`\n]*(?:pytest|unittest|npm (?:run )?test|yarn test|pnpm test|go test|"
+    r"cargo test|jest|vitest|rspec|phpunit|tox|make test)[^`\n]*)`",
+    re.I,
+)
+
 
 def orchid_dir(root: Path) -> Path:
     return root / ORCHID_DIRNAME
+
+
+def get_test_command(root: Path) -> str | None:
+    """The project's test command for on-demand verification: an explicit
+    settings.test_command, else a backticked command lifted from AGENTS.md."""
+    file = read_project_file(root) or {}
+    cmd = ((file.get("settings") or {}).get("test_command") or "").strip()
+    if cmd:
+        return cmd
+    agents = root / "AGENTS.md"
+    if agents.is_file():
+        try:
+            m = _TEST_CMD_RE.search(agents.read_text(errors="replace"))
+            if m:
+                return m.group(1).strip()
+        except OSError:
+            pass
+    return None
 
 
 def _project_file(root: Path) -> Path:

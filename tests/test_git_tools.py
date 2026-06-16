@@ -126,6 +126,22 @@ async def test_list_open_prs_no_remote_returns_empty(tmp_path):
     assert await list_open_prs(tmp_path) == []
 
 
+@pytest.mark.anyio
+async def test_run_branch_command_in_worktree(harness):
+    root, _bus, tools = harness
+    await tools["create_branch"].handler({"branch_name": "feat/rt"})
+    (root / "marker.txt").write_text("hi\n")
+    await tools["git_commit"].handler({"message": "add marker", "paths": "."})
+    from orchid.git_ops import run_branch_command
+    rc, out = await run_branch_command(root, "feat/rt", "cat marker.txt", timeout=30)
+    assert rc == 0 and "hi" in out
+    # worktree is cleaned up afterwards
+    import subprocess
+    wl = subprocess.run(["git", "worktree", "list"], cwd=str(root),
+                        capture_output=True, text=True).stdout
+    assert "orchid-verify-" not in wl
+
+
 def test_test_path_heuristic():
     from orchid.git_ops import touches_tests
     for p in ["tests/test_x.py", "src/foo_test.go", "a/b.test.ts",

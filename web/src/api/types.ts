@@ -20,6 +20,8 @@ export type Project = {
 export type ProjectSettings = {
   model?: string | null;
   permission_mode?: PermissionMode;
+  /** Test command run by on-demand review verification. */
+  test_command?: string | null;
 };
 
 export type PermissionMode = "acceptEdits" | "default" | "plan" | "bypassPermissions";
@@ -312,4 +314,13 @@ export type ReviewRequest = {
   /** Set when the review is backed by a real GitHub PR (repo has a GitHub remote). */
   pr_number?: number | null;
   pr_url?: string | null;
+  /** PR CI checks, computed on the single-review GET when PR-backed. */
+  ci?: {
+    total: number;
+    passed: number;
+    failed: number;
+    pending: number;
+    state: "passed" | "failed" | "pending";
+    lines: string[];
+  } | null;
 };

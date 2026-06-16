@@ -29,6 +29,7 @@ export function ProjectSettings({ pid }: { pid: string }) {
   const [model, setModel] = useState<string>(INHERIT);
   const [customModel, setCustomModel] = useState("");
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("acceptEdits");
+  const [testCommand, setTestCommand] = useState("");
   // Once the projects query resolves, adopt the real name (only if untouched).
   const [nameTouched, setNameTouched] = useState(false);
   const effectiveName = nameTouched ? name : (project?.name ?? "");
@@ -50,7 +51,7 @@ export function ProjectSettings({ pid }: { pid: string }) {
       model === INHERIT ? null : model === "__custom__" ? customModel.trim() || null : model;
     const patch: ProjectUpdate = {
       ...(trimmedName && trimmedName !== project?.name ? { name: trimmedName } : {}),
-      settings: { model: modelValue, permission_mode: permissionMode },
+      settings: { model: modelValue, permission_mode: permissionMode, test_command: testCommand.trim() || null },
     };
     save.mutate(patch);
   };
@@ -118,6 +119,19 @@ export function ProjectSettings({ pid }: { pid: string }) {
                 </option>
               ))}
             </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-zinc-400">Test command</span>
+            <input
+              value={testCommand}
+              placeholder="e.g. uv run pytest -q"
+              onChange={(e) => setTestCommand(e.target.value)}
+              className="w-full rounded-lg border border-zinc-700 bg-ink-900 px-3 py-1.5 font-mono text-sm text-zinc-100 outline-none focus:border-violet-500/60"
+            />
+            <span className="mt-1 block text-[11px] text-zinc-600">
+              Run by “Run checks” on a review (against its branch, in a throwaway worktree).
+            </span>
           </label>
         </div>
 

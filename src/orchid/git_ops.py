@@ -165,3 +165,53 @@ async def github_pr_state(root: Path, pr_number: int) -> str | None:
         return json.loads(j).get("state")
     except Exception:
         return None
+
+
+async def github_pr_checks(root: Path, pr_number: int) -> dict | None:
+    """Summarise a PR's CI checks (statusCheckRollup) as verification evidence.
+    Returns {total,passed,failed,pending,state,lines} or None when there are no
+    checks / no remote."""
+    try:
+        rc, j = await run(root, "gh", "pr", "view", str(pr_number), "--json", "statusCheckRollup")
+        if rc != 0:
+            return None
+        import json
+        rollup = json.loads(j).get("statusCheckRollup") or []
+        if not rollup:
+            return None
+        passed = failed = pending = 0
+        lines = []
+        for c in rollup:
+            name = c.get("name") or c.get("context") or "check"
+            res = (c.get("conclusion") or c.get("state") or "").upper()
+            status = (c.get("status") or "").upper()
+            if res in ("SUCCESS", "NEUTRAL", "SKIPPED"):
+                passed += 1; mark = "✓"
+            elif res in ("FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"):
+                failed += 1; mark = "✗"
+            else:  # PENDING/QUEUED/IN_PROGRESS or COMPLETED-without-conclusion
+                pending += 1; mark = "•"
+            _ = status
+            lines.append(f"{mark} {name}" + (f" ({res.lower()})" if res else ""))
+        state = "failed" if failed else ("pending" if pending else "passed")
+        return {"total": len(rollup), "passed": passed, "failed": failed,
+                "pending": pending, "state": state, "lines": lines}
+    except Exception:
+        return None
+
+
+async def run_branch_command(root: Path, branch: str, command: str,
+                             timeout: float = 600) -> tuple[int, str]:
+    """Run a shell command against a branch in a throwaway git worktree, so it
+    never disturbs the main working tree or an active session. Returns (rc, output)."""
+    import shutil
+    import tempfile
+    wt = tempfile.mkdtemp(prefix="orchid-verify-")
+    try:
+        rc, out = await run_git(root, "worktree", "add", "--detach", wt, branch)
+        if rc != 0:
+            return rc, f"could not create worktree for '{branch}':\n{out}"
+        return await run(Path(wt), "sh", "-c", command, timeout=timeout)
+    finally:
+        await run_git(root, "worktree", "remove", "--force", wt)
+        shutil.rmtree(wt, ignore_errors=True)

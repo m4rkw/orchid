@@ -216,6 +216,12 @@ export const api = {
       `/api/projects/${encodeURIComponent(pid)}/reviews/${encodeURIComponent(rid)}`,
     ),
 
+  verifyReview: (pid: string, rid: string) =>
+    request<ReviewRequest>(
+      `/api/projects/${encodeURIComponent(pid)}/reviews/${encodeURIComponent(rid)}/verify`,
+      { method: "POST" },
+    ),
+
   reviewDiff: (pid: string, rid: string) =>
     request<{ diff: string }>(
       `/api/projects/${encodeURIComponent(pid)}/reviews/${encodeURIComponent(rid)}/diff`,

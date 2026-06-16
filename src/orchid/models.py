@@ -8,6 +8,7 @@ SessionStatus = Literal["idle", "running", "external"]
 class ProjectSettingsModel(BaseModel):
     model: str | None = None
     permission_mode: str = "acceptEdits"
+    test_command: str | None = None  # used by on-demand review verification
 
 
 class Project(BaseModel):

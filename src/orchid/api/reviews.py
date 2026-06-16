@@ -7,11 +7,11 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 
 from ..git_ops import (
-    changed_files, find_base_branch, github_pr_state, list_open_prs, merge_branch,
-    merge_github_pr, run_git, touches_tests,
+    changed_files, find_base_branch, github_pr_checks, github_pr_state, list_open_prs,
+    merge_branch, merge_github_pr, run_branch_command, run_git, touches_tests,
 )
 from ..services import ApiError, ProjectService
-from ..store import review_store
+from ..store import project_store, review_store
 
 router = APIRouter()
 
@@ -71,12 +71,15 @@ async def get_review(request: Request, project_id: str, review_id: str):
             request.app.state.bus.publish(
                 "sidebar", "review_updated", {"project_id": project_id, "review": review})
     # Enrich (computed on read, never stored, so it always reflects the branch as-is):
-    # which files changed, and whether any are tests — the agent can't fake this.
+    # changed files + test-touch flag (agent-proof), and the PR's CI checks as
+    # real verification evidence when the review is PR-backed.
     files = await changed_files(root, review.get("branch", ""))
+    ci = await github_pr_checks(root, review["pr_number"]) if review.get("pr_number") else None
     return {
         **review,
         "files_changed": len(files),
         "touches_tests": touches_tests(files),
+        "ci": ci,
     }
 
 
@@ -142,6 +145,34 @@ async def reject_review(request: Request, project_id: str, review_id: str, body:
     bus.publish("sidebar", "review_updated", {
         "project_id": project_id, "review": review,
     })
+    return review
+
+
+@router.post("/projects/{project_id}/reviews/{review_id}/verify")
+async def verify_review(request: Request, project_id: str, review_id: str):
+    """Run the project's test command against the review's branch (in a throwaway
+    worktree) and attach the output as the review's verification evidence."""
+    root = Path(_service(request).get_entry(project_id)["root"])
+    review = review_store.read_review(root, review_id)
+    if review is None:
+        raise ApiError("REVIEW_NOT_FOUND", f"no review {review_id}", 404)
+    cmd = project_store.get_test_command(root)
+    if not cmd:
+        raise ApiError(
+            "NO_TEST_COMMAND",
+            "No test command configured. Set one in project settings, or document it "
+            "in backticks in AGENTS.md.", 400)
+    branch = review.get("branch", "")
+    rc, out = await run_branch_command(root, branch, cmd)
+    status = "PASS" if rc == 0 else "FAIL"
+    capped = out if len(out) <= 8000 else "…" + out[-8000:]
+    review["verification"] = (
+        f"On-demand verification — `{cmd}` on `{branch}`\n"
+        f"Exit {rc} ({status})\n\n{capped}"
+    )
+    review_store.write_review(root, review)
+    request.app.state.bus.publish(
+        "sidebar", "review_updated", {"project_id": project_id, "review": review})
     return review
 
 
