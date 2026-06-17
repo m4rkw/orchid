@@ -260,14 +260,6 @@ export const api = {
     return request<InboxItem[]>(`/api/inbox${qs ? `?${qs}` : ""}`);
   },
 
-  projectInbox: (pid: string, status?: InboxStatus, source?: string) => {
-    const q = new URLSearchParams();
-    if (status) q.set("status", status);
-    if (source) q.set("source", source);
-    const qs = q.toString();
-    return request<InboxItem[]>(`/api/projects/${encodeURIComponent(pid)}/inbox${qs ? `?${qs}` : ""}`);
-  },
-
   resolveInboxItem: (pid: string, id: string, optionId: string, payload?: Record<string, unknown>) =>
     request<InboxItem>(
       `/api/projects/${encodeURIComponent(pid)}/inbox/${encodeURIComponent(id)}/resolve`,

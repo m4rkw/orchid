@@ -99,7 +99,9 @@ function InboxGroup({
         await api.resolveInboxItem(it.project_id, it.id, optionId);
       }
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["inbox"] }),
+    // onSettled, not onSuccess: a mid-batch failure still resolves earlier items
+    // server-side, so refetch regardless to reconcile the list.
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: ["inbox"] }),
   });
 
   return (

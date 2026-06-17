@@ -247,6 +247,7 @@ function loadSelection(): Selection {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && typeof parsed.pid === "string") return parsed as Selection;
+    if (parsed && typeof parsed === "object" && parsed.inbox === true) return parsed as Selection;
   } catch { /* ignore */ }
   return null;
 }
@@ -629,15 +630,18 @@ export const useAppStore = create<AppState>()((set, get) => ({
         case "inbox_created":
         case "inbox_resolved": {
           const pid = payload.project_id as string;
-          const item = payload.item as { id?: string; title?: string } | undefined;
+          const item = payload.item as
+            { id?: string; title?: string; group_id?: string | null; group_label?: string | null } | undefined;
           void queryClient.invalidateQueries({ queryKey: ["inbox"] });
           if (pid) void queryClient.invalidateQueries({ queryKey: ["inbox", pid] });
           if (type === "inbox_created" && item?.id) {
             const id = item.id;
+            // Collapse a batch (shared group) into one desktop popup, matching the
+            // server's one-push-per-group suppression; ungrouped items notify per id.
             notify({
               title: "Orchid — inbox",
-              body: typeof item.title === "string" ? item.title : "A new item needs your input",
-              tag: `inbox:${id}`,
+              body: item.group_label || (typeof item.title === "string" ? item.title : "A new item needs your input"),
+              tag: item.group_id ? `inbox-group:${item.group_id}` : `inbox:${id}`,
               onClick: () => get().selectInbox(id),
             });
           }
