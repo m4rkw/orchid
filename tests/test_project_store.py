@@ -7,9 +7,20 @@ def test_init_project_writes_state(tmp_path):
     data = project_store.init_project(tmp_path, "prj_x", "Demo")
     assert data["id"] == "prj_x"
     assert data["name"] == "Demo"
-    assert (tmp_path / ".orchid" / ".gitignore").read_text() == "*\n"
+    gi = (tmp_path / ".orchid" / ".gitignore").read_text()
+    assert "*\n" in gi and "!spec.json" in gi and "!architecture.json" in gi  # docs tracked
     on_disk = json.loads((tmp_path / ".orchid" / "project.json").read_text())
     assert on_disk["settings"]["permission_mode"] == "acceptEdits"
+
+
+def test_writing_a_spec_untracks_only_docs(tmp_path):
+    from orchid.store import spec_store
+    project_store.init_project(tmp_path, "prj_gi", "GI")
+    spec_store.write_spec(tmp_path, {"version": 1, "title": "S", "content": "x", "status": "active"})
+    gi = (tmp_path / ".orchid" / ".gitignore").read_text()
+    # docs un-ignored; everything else (plans/reviews/sessions/usage) still ignored
+    assert "!spec.json" in gi and "!architecture.json" in gi
+    assert "!sessions.json" not in gi and "!plans" not in gi
 
 
 def test_init_project_is_idempotent(tmp_path):

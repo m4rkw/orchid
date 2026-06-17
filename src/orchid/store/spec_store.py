@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .jsonio import atomic_write_json, load_json
-from .project_store import orchid_dir
+from .project_store import ensure_orchid_gitignore, orchid_dir
 
 
 def spec_path(root: Path) -> Path:
@@ -24,4 +24,5 @@ def read_spec(root: Path) -> dict[str, Any] | None:
 def write_spec(root: Path, spec: dict[str, Any]) -> None:
     path = spec_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_orchid_gitignore(root)  # keep the doc tracked in git
     atomic_write_json(path, spec)

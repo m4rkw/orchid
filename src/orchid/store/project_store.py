@@ -45,13 +45,36 @@ def _sessions_file(root: Path) -> Path:
     return orchid_dir(root) / "sessions.json"
 
 
+# .orchid/ is local state and ignored — except the living docs (architecture +
+# spec), which are versioned alongside the code so they travel with the repo.
+_ORCHID_GITIGNORE = (
+    "# Orchid state is local to this machine and ignored — except the living\n"
+    "# documents (architecture + spec), which are checked into git.\n"
+    "*\n"
+    "!.gitignore\n"
+    "!architecture.json\n"
+    "!spec.json\n"
+)
+
+
+def ensure_orchid_gitignore(root: Path) -> None:
+    """Write/refresh .orchid/.gitignore so the living docs are tracked. Idempotent;
+    called on init and on every doc write so existing projects pick it up too."""
+    d = orchid_dir(root)
+    d.mkdir(parents=True, exist_ok=True)
+    gi = d / ".gitignore"
+    try:
+        if not gi.exists() or gi.read_text() != _ORCHID_GITIGNORE:
+            gi.write_text(_ORCHID_GITIGNORE)
+    except OSError:
+        pass
+
+
 def init_project(root: Path, project_id: str, name: str) -> dict:
     """Create .orchid/ state in a project root (idempotent)."""
     d = orchid_dir(root)
     d.mkdir(parents=True, exist_ok=True)
-    gitignore = d / ".gitignore"
-    if not gitignore.exists():
-        gitignore.write_text("*\n")
+    ensure_orchid_gitignore(root)
     existing = read_project_file(root)
     if existing:
         return existing

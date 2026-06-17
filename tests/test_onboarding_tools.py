@@ -33,7 +33,7 @@ async def test_register_project_full_flow(harness, homes):
 
     assert registry.find_by_root(target) is not None
     assert (target / ".orchid" / "project.json").exists()
-    assert (target / ".orchid" / ".gitignore").read_text() == "*\n"
+    assert "!spec.json" in (target / ".orchid" / ".gitignore").read_text()
 
     types = set()
     while sub.queue.qsize():

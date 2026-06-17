@@ -1,0 +1,6 @@
+# Orchid state is local to this machine and ignored — except the living
+# documents (architecture + spec), which are checked into git.
+*
+!.gitignore
+!architecture.json
+!spec.json
