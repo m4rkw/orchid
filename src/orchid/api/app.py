@@ -17,7 +17,7 @@ from ..config import Settings
 from ..services import ApiError, ProjectService, SessionService
 from ..store.registry import Registry
 from ..watch.watcher import WatcherManager
-from . import architecture, collaborations, elevation, onboarding_api, permissions, plans, policies, projects, reviews, sessions, specs, ws
+from . import architecture, collaborations, elevation, inbox, onboarding_api, permissions, plans, policies, projects, reviews, sessions, specs, ws
 
 _FALLBACK_HTML = """<!doctype html><html><body style="font-family: ui-monospace, monospace;
 background:#0b0b0f; color:#d4d4d8; display:grid; place-items:center; height:100vh; margin:0">
@@ -77,6 +77,7 @@ def create_app(settings: Settings | None = None, runner: Runner | None = None) -
         app.state.service = service
         app.state.onboarding = onboarding
         app.state.orchidd_client = orchidd_client
+        app.state.notifier = notifier
         app.state.claude_cli_version = await _claude_cli_version()
         await watcher.start(registry.list())
         await driver_manager.auto_resume()
@@ -112,6 +113,7 @@ def create_app(settings: Settings | None = None, runner: Runner | None = None) -
     app.include_router(sessions.router, prefix="/api")
     app.include_router(plans.router, prefix="/api")
     app.include_router(reviews.router, prefix="/api")
+    app.include_router(inbox.router, prefix="/api")
     app.include_router(specs.router, prefix="/api")
     app.include_router(architecture.router, prefix="/api")
     app.include_router(policies.router, prefix="/api")

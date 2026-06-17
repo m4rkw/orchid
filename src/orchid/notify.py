@@ -26,6 +26,9 @@ class Notifier:
         # Keep strong refs to in-flight fire-and-forget tasks: the event loop
         # only holds weak refs, so an unreferenced task can be GC'd mid-send.
         self._tasks: set = set()
+        # Group ids already pushed for, so a batch of inbox items sharing a group
+        # (e.g. one docmgr run) only sends one push, not one per item.
+        self._pushed_groups: set[str] = set()
 
     @property
     def pushover_enabled(self) -> bool:
@@ -40,6 +43,22 @@ class Notifier:
         if project_id and review_id:
             return f"{self._base}/?project={project_id}&review={review_id}"
         return self._base
+
+    def inbox_url(self, project_id: str | None, item_id: str | None) -> str:
+        if project_id and item_id:
+            return f"{self._base}/?project={project_id}&inbox={item_id}"
+        return self._base
+
+    def first_in_group(self, group_id: str | None) -> bool:
+        """True the first time a non-empty group id is seen, False after — so a
+        batch of items sharing a group only notifies once. Ungrouped items
+        (group_id falsy) always return True."""
+        if not group_id:
+            return True
+        if group_id in self._pushed_groups:
+            return False
+        self._pushed_groups.add(group_id)
+        return True
 
     def push_bg(self, title: str, message: str, url: str | None = None,
                 url_title: str | None = None) -> None:
