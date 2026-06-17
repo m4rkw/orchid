@@ -9,12 +9,13 @@ import { ProjectDashboard } from "./components/project/ProjectDashboard";
 import { PlansView } from "./components/project/PlansView";
 import { ProjectSettings } from "./components/project/ProjectSettings";
 import { ReviewPanel } from "./components/project/ReviewPanel";
+import { InboxPanel } from "./components/project/InboxPanel";
 import { SpecView } from "./components/project/SpecView";
 import { ArchitectureView } from "./components/project/ArchitectureView";
 import { NewSessionComposer } from "./components/session/NewSessionComposer";
 import { SessionView } from "./components/session/SessionView";
 import { ProjectTree } from "./components/tree/ProjectTree";
-import { isCollabSel, isNewCollabSel, isProjectSel, useAppStore } from "./state/stores";
+import { isCollabSel, isInboxSel, isNewCollabSel, isProjectSel, useAppStore } from "./state/stores";
 import { useWsStatus } from "./ws/useWsStatus";
 
 export default function App() {
@@ -93,7 +94,9 @@ export default function App() {
           <ProjectTree />
         </aside>
         <main className="min-w-0 flex-1 overflow-hidden">
-          {isCollabSel(selected) ? (
+          {isInboxSel(selected) ? (
+            <InboxPanel />
+          ) : isCollabSel(selected) ? (
             <CollaborationView key={selected.collab} cid={selected.collab} />
           ) : isNewCollabSel(selected) ? (
             <NewCollaboration />

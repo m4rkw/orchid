@@ -8,17 +8,23 @@ import { useAppStore } from "./state/stores";
 import { socket } from "./ws/socket";
 import "./index.css";
 
-// Deep links from notifications: ?project=<pid>&session=<sid> or &review=<rid>.
-// Apply the selection, then strip the query so a refresh doesn't re-trigger it.
+// Deep links from notifications: ?inbox=<id>, or ?project=<pid>&session=<sid>
+// or &review=<rid>. Apply the selection, then strip the query so a refresh
+// doesn't re-trigger it.
 (function applyDeepLink() {
   const q = new URLSearchParams(window.location.search);
+  const inboxId = q.get("inbox");
   const pid = q.get("project");
-  if (!pid) return;
-  const sid = q.get("session");
-  const reviewId = q.get("review");
-  if (sid) useAppStore.getState().select({ pid, sid });
-  else if (reviewId) useAppStore.getState().select({ pid, reviews: true, reviewId });
-  else useAppStore.getState().select({ pid });
+  if (!inboxId && !pid) return;
+  if (inboxId) {
+    useAppStore.getState().selectInbox(inboxId);
+  } else if (pid) {
+    const sid = q.get("session");
+    const reviewId = q.get("review");
+    if (sid) useAppStore.getState().select({ pid, sid });
+    else if (reviewId) useAppStore.getState().select({ pid, reviews: true, reviewId });
+    else useAppStore.getState().select({ pid });
+  }
   window.history.replaceState(null, "", window.location.pathname);
 })();
 

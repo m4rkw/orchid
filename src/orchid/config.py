@@ -26,8 +26,12 @@ class Settings:
             claude_config_dir=Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser(),
             host=os.environ.get("ORCHID_HOST", "127.0.0.1"),
             port=int(os.environ.get("ORCHID_PORT", "4242")),
-            pushover_token=os.environ.get("ORCHID_PUSHOVER_TOKEN") or None,
-            pushover_user=os.environ.get("ORCHID_PUSHOVER_USER") or None,
+            # Accept the bare PUSHOVER_* names too, so an existing Pushover setup
+            # on the host works without Orchid-specific aliases.
+            pushover_token=(os.environ.get("ORCHID_PUSHOVER_TOKEN")
+                            or os.environ.get("PUSHOVER_APP_KEY") or None),
+            pushover_user=(os.environ.get("ORCHID_PUSHOVER_USER")
+                           or os.environ.get("PUSHOVER_USER_KEY") or None),
             base_url=os.environ.get("ORCHID_BASE_URL") or None,
         )
 

@@ -1,10 +1,10 @@
 ---
 {
-  "version": 6,
+  "version": 9,
   "title": "Orchid — System Specification",
   "status": "active",
   "created_at": "2026-06-15T20:02:19.158052+00:00",
-  "updated_at": "2026-06-16T20:53:56.747998+00:00"
+  "updated_at": "2026-06-17T19:18:26.457511+00:00"
 }
 ---
 
@@ -28,6 +28,8 @@ the user's machine with no cloud dependency.
 
 ## Core concepts
 
+## Core concepts
+
 - **Project**: a registered directory Orchid manages. Holds `.orchid/` state.
 - **Session**: one Claude Code conversation. Orchid only surfaces/streams the
   sessions it created (`created_by == "orchid"`); terminal-started transcripts in
@@ -46,6 +48,10 @@ the user's machine with no cloud dependency.
   MUST be reflected here BEFORE review — this is enforced for all agents, not optional.
 - **Review**: a request to merge a feature branch, resolved manually (human) or
   autonomously (reviewer agent).
+- **Inbox item**: a generic unit of human decision. Any program — Orchid or an
+  external tool — creates one when it has automated as far as it can but needs a
+  person to choose; the human picks an option and the originator acts on the
+  outcome. See the Inbox section.
 - **Meta-project**: a project of `project_type: "meta"` linking child projects;
   its orchestrator receives every child's AGENTS.md for cross-repo context.
 
@@ -78,6 +84,8 @@ the user's machine with no cloud dependency.
 
 ## State files
 
+## State files
+
 - `~/.orchid/registry.json` — registered projects (paths only).
 - `<root>/.orchid/project.json` — id, name, settings, intent, goal, review_mode,
   project_type, children.
@@ -87,6 +95,8 @@ the user's machine with no cloud dependency.
 - `<root>/.orchid/spec.json` — this living specification.
 - `<root>/.orchid/plans/<id>.json` — durable orchestrator plans.
 - `<root>/.orchid/reviews/<id>.json` — branch review requests.
+- `<root>/.orchid/inbox/<id>.json` — inbox work items awaiting / carrying a
+  human decision.
 - `<root>/.orchid/usage/<sid>.json` — accumulated per-session cost / turns.
 - `<root>/AGENTS.md` — project memory, injected into every orchestrator prompt.
 - `~/.orchid/orchidd_acl.json` — elevated-operation grants for the daemon.
@@ -153,13 +163,56 @@ agent self-report. Concretely:
 
 ## Notifications
 
+## Notifications
+
 - Orchid surfaces "needs you" moments out of band: a desktop browser
   notification (default; fires only when the tab is unfocused) on a pending
-  permission request or a new review request, and an optional Pushover push
-  (enabled when token + user are configured) carrying a deep link
-  (`?project=&session=` or `?project=&review=`) that routes straight to the
-  relevant view. Per-session permission pushes are burst-suppressed to one per
-  pending window.
+  permission request, a new review request, or a new inbox item, and an optional
+  Pushover push (enabled when token + user are configured) carrying a deep link
+  (`?project=&session=`, `?project=&review=`, or `?project=&inbox=`) that routes
+  straight to the relevant view. Per-session permission pushes are burst-suppressed
+  to one per pending window; inbox pushes are burst-suppressed to one per item
+  group. Pushover credentials come from `PUSHOVER_APP_KEY` / `PUSHOVER_USER_KEY`
+  (or the `ORCHID_PUSHOVER_*` aliases) in the environment.
+
+## Inbox (work items)
+
+The inbox is a generic, project-agnostic human-decision surface — a sibling of
+reviews and permission requests. Its purpose is to let automation run as far as
+it reliably can and then surface only the genuinely human decisions, simply.
+
+- **Producer**: any program (Orchid itself or an external tool such as docmgr)
+  POSTs a work item to `POST /api/projects/{pid}/inbox`. An item carries a
+  `source`, a `title`, optional markdown `body`, an optional `group_id` /
+  `group_label` for clustering a batch, a list of `options` (the decision
+  "buttons": `{id, label, detail}`), and an arbitrary `context` blob the producer
+  needs handed back verbatim.
+- **Surface**: items appear in a single unified web Inbox spanning every project
+  (a top-level sidebar entry with a pending-count badge). Items are grouped by
+  `group_label`; each item shows its options as buttons, with an "apply to all in
+  group" shortcut for batches and a dismiss affordance. `GET /api/inbox` is the
+  cross-project aggregate; `GET /api/projects/{pid}/inbox` is per-project. Both
+  accept `status` and `source` filters.
+- **Resolution**: the human picks an option; `POST .../inbox/{id}/resolve`
+  records `{option_id, payload}` and stamps the item `resolved`. `dismiss` marks
+  it `dismissed`. An option_id not offered by the item is rejected (400).
+- **Contract is pull, not push**: Orchid records the chosen outcome but never
+  executes it. The producer polls (`GET ...?status=resolved`) and acts on the
+  decision itself — so an external tool stays a plain HTTP client with no inbound
+  surface. A resolved decision is also the producer's cue to LEARN (e.g. persist
+  the choice as a rule) so the same decision need not be asked again.
+
+### Reference producer: docmgr ambiguous filing
+
+docmgr (an automated Hazel replacement that sorts PDFs into a Documents tree)
+infers a document's vendor with Claude, then matches it to a folder rule. When
+two or more filing rules could legitimately claim a document (e.g. a shared-house
+invoice tree vs a personal receipts tree) — an ambiguity an LLM cannot reliably
+resolve — docmgr stops guessing and POSTs a grouped inbox item, one per
+ambiguous document, with the candidate destinations as options. On a later run it
+reads the resolved items, files each document into the chosen tree, and writes
+the vendor into that rule's lookup so future documents from the same vendor sort
+automatically.
 
 ## Real-time / event model
 

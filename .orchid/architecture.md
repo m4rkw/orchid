@@ -1,10 +1,10 @@
 ---
 {
-  "version": 2,
+  "version": 6,
   "title": "Orchid — Architecture",
   "status": "active",
   "created_at": "2026-06-16T20:13:01.051581+00:00",
-  "updated_at": "2026-06-16T20:27:55.750185+00:00"
+  "updated_at": "2026-06-17T19:17:20.197509+00:00"
 }
 ---
 
@@ -27,9 +27,12 @@ Three processes, no database:
 
 ## Backend layout (`src/orchid/`)
 
-- `api/` — FastAPI routers (`projects`, `sessions`, `plans`, `reviews`, `specs`,
-  `architecture`, `policies`, `permissions`, `onboarding_api`, `collaborations`,
-  `elevation`, `ws`) plus `app.py` (composition root / lifespan) and `health`.
+## Backend layout (`src/orchid/`)
+
+- `api/` — FastAPI routers (`projects`, `sessions`, `plans`, `reviews`, `inbox`,
+  `specs`, `architecture`, `policies`, `permissions`, `onboarding_api`,
+  `collaborations`, `elevation`, `ws`) plus `app.py` (composition root /
+  lifespan) and `health`.
 - `claude/` — the ONLY place that imports `claude_agent_sdk`. Contains:
   - `runner.py` — `Runner` protocol + `SdkRunner`; the seam tests fake.
   - `driver.py` — per-session client FSM; one asyncio task owns one
@@ -48,14 +51,20 @@ Three processes, no database:
     `architecture_tools.py`, `policy`/`consult`, `elevated_tools.py`.
 - `store/` — flat-JSON persistence, atomic writes (`jsonio.atomic_write_json`):
   `registry`, `project_store`, `agents_store`, `plan_store`, `review_store`,
-  `spec_store`, `architecture_store`, `usage_store`, `policy_store`, `paths`.
+  `inbox_store`, `spec_store`, `architecture_store`, `usage_store`,
+  `policy_store`, `paths`.
 - `bus.py` — in-process pub/sub with per-topic monotonic `seq`.
 - `watch/watcher.py` — one `watchfiles` task; routes external transcript changes
   for Orchid-owned sessions only, suppressed while a driver is active.
 - `services.py` — `ProjectService` + `SessionService` (reads spanning registry,
   catalog, cache); `is_running`/`live_agents` wired from `DriverManager`.
-- `notify.py` — desktop + optional Pushover notifications (push owns task refs).
+- `notify.py` — desktop + optional Pushover notifications (push owns task refs);
+  `inbox_url` deep links + per-group push burst-suppression.
 - `config.py` — `Settings` from env (orchid_home, host/port, Pushover, base_url).
+  Pushover creds accept the bare `PUSHOVER_APP_KEY`/`PUSHOVER_USER_KEY` names as
+  well as the `ORCHID_PUSHOVER_*` aliases.
+
+## Frontend layout (`web/src/`)
 
 ## Frontend layout (`web/src/`)
 
@@ -64,7 +73,8 @@ Three processes, no database:
   Query for REST cache, invalidated by bus events.
 - `ws/socket.ts` — WS manager (subscribe, seq watermark, resync on gap).
 - `components/` — console (onboarding), session transcript, project dashboard,
-  plans, reviews, spec, architecture, settings.
+  plans, reviews, the unified inbox (global, all-projects work-item view), spec,
+  architecture, settings.
 - `notify.ts` — browser desktop notifications off WS events.
 
 ## orchidd daemon (`src/orchidd/`)
@@ -76,6 +86,8 @@ Three processes, no database:
 - `acl.py` — grant matching: file ops by `file_read`/`file_write`/`file_delete`
   per project root; `exec` by exact-or-`prefix *` allow-list. Scoped by blast
   radius. `client.py` (under `orchid/orchidd/`) is the in-app caller.
+
+## Key decisions & boundaries
 
 ## Key decisions & boundaries
 
@@ -100,6 +112,17 @@ Three processes, no database:
   the review; approve/merge goes through `gh pr merge` and read reconciles PR
   state. Repos without a remote fall back to a local-branch merge. One review
   trail — agents must use request_review, not raw `gh pr create`.
+- **Decision surfaces**: Orchid exposes three human-decision surfaces with the
+  same store -> bus -> WS -> notify shape — permission requests, reviews, and the
+  generic **inbox**. The inbox (`inbox_store` + `api/inbox` + `inbox_created`/
+  `inbox_resolved` on `sidebar`) lets ANY program — Orchid or an external tool —
+  POST a grouped work item with option "buttons" and an arbitrary `context` blob,
+  have a human pick an option, and poll for the resolution. Orchid records the
+  chosen outcome but never executes it; the originator owns acting on it. This is
+  a pull contract (the source polls), not a callback, so an external tool stays a
+  plain client with no inbound surface.
+
+## Request / data flow
 
 ## Request / data flow
 
@@ -112,6 +135,10 @@ Three processes, no database:
 4. `turn_completed` -> `usage_store` accrual + `usage_updated`.
 5. Elevated need -> `elevated_*` MCP tool -> orchidd client -> daemon (ACL) -> op.
 6. External transcript write -> watcher -> session refresh (Orchid-owned only).
+7. Inbox: a program POSTs a work item -> `inbox_store` + `inbox_created` (+ a
+   per-group push) -> WS -> unified web inbox -> human resolves -> `inbox_resolved`
+   records the chosen option -> the originating program polls `?status=resolved`
+   and acts on the decision.
 
 ## Testing seams
 
