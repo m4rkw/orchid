@@ -74,6 +74,21 @@ def test_cache_eviction_cap():
     assert cache.ingest("s", [nm("u0")]) == []
 
 
+def test_ingest_drops_stranded_live_partial_keeps_real_inflight():
+    # A streamed partial with a synthetic "live-" uuid (its persisted copy lands
+    # on disk under a different real uuid) must NOT be stranded at the end on
+    # re-read — but a genuinely in-flight message with a real uuid is kept.
+    cache = TranscriptCache()
+    cache.append_live("s", nm("live-abc123", "partial answer"))   # transient stream copy
+    cache.append_live("s", nm("real-inflight", "not on disk yet"))
+    # disk re-read: the persisted answer has its real uuid; the partial is NOT on disk
+    cache.ingest("s", [nm("u-prompt"), nm("u-answer", "full answer")])
+    uuids = [m.uuid for m in cache.get("s")]
+    assert "live-abc123" not in uuids            # stranded partial dropped
+    assert uuids[:2] == ["u-prompt", "u-answer"]  # disk order preserved
+    assert "real-inflight" in uuids              # genuine in-flight kept
+
+
 def test_cache_drop():
     cache = TranscriptCache()
     cache.ingest("s", [nm("a")])

@@ -38,8 +38,19 @@ def _result_content_text(content: Any) -> Any:
     return content
 
 
+# Streamed messages often arrive with no SDK uuid yet (e.g. the text chunk before
+# tool calls). We tag the placeholder id with this prefix so the cache can tell a
+# transient live-only copy (which will be superseded by its persisted, real-uuid
+# record) from a genuinely in-flight message and not strand it at the end.
+_LIVE_PREFIX = "live-"
+
+
 def _new_uuid() -> str:
     return uuidlib.uuid4().hex
+
+
+def _live_uuid() -> str:
+    return _LIVE_PREFIX + uuidlib.uuid4().hex
 
 
 def normalize_stream_message(msg: Any, cap: int = PREVIEW_CAP) -> NormalizedMessage | None:
@@ -64,7 +75,7 @@ def normalize_stream_message(msg: Any, cap: int = PREVIEW_CAP) -> NormalizedMess
         if not blocks:
             return None
         return NormalizedMessage(
-            uuid=msg.uuid or _new_uuid(),
+            uuid=msg.uuid or _live_uuid(),
             role="assistant",
             agent_id=None,
             blocks=blocks,
@@ -91,7 +102,7 @@ def normalize_stream_message(msg: Any, cap: int = PREVIEW_CAP) -> NormalizedMess
                     )
         if not blocks:
             return None
-        return NormalizedMessage(uuid=msg.uuid or _new_uuid(), role="user", agent_id=None, blocks=blocks)
+        return NormalizedMessage(uuid=msg.uuid or _live_uuid(), role="user", agent_id=None, blocks=blocks)
 
     if isinstance(msg, ResultMessage):
         parts = ["turn done"]
@@ -99,7 +110,7 @@ def normalize_stream_message(msg: Any, cap: int = PREVIEW_CAP) -> NormalizedMess
             parts.append(f"${msg.total_cost_usd:.4f}")
         parts.append(f"{msg.duration_ms / 1000:.1f}s")
         return NormalizedMessage(
-            uuid=msg.uuid or _new_uuid(),
+            uuid=msg.uuid or _live_uuid(),
             role="result",
             agent_id=None,
             blocks=[Block(type="text", text=" · ".join(parts))],
@@ -199,7 +210,14 @@ class TranscriptCache:
         for m in normalized:
             seen.add(m.uuid)
         disk_uuids = {m.uuid for m in normalized}
-        live_only = [m for m in messages if m.uuid not in disk_uuids]
+        # Keep genuinely in-flight messages (real uuids not yet persisted), but
+        # drop transient streamed copies (synthetic "live-" uuids): their persisted
+        # counterpart is already in `normalized`, so re-appending would duplicate
+        # the message and strand the stale copy at the end of the transcript.
+        live_only = [
+            m for m in messages
+            if m.uuid not in disk_uuids and not m.uuid.startswith(_LIVE_PREFIX)
+        ]
         messages.clear()
         messages.extend(normalized)
         messages.extend(live_only)
