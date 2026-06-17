@@ -89,6 +89,21 @@ def test_ingest_drops_stranded_live_partial_keeps_real_inflight():
     assert "real-inflight" in uuids              # genuine in-flight kept
 
 
+def test_ingest_preserves_live_timestamps():
+    # A live message's receipt timestamp must survive a disk re-read (the SDK
+    # doesn't surface per-message timestamps, so we carry it by uuid).
+    cache = TranscriptCache()
+    live = NormalizedMessage(
+        uuid="a", role="assistant", agent_id=None,
+        blocks=[Block(type="text", text="x")], timestamp="2026-01-01T00:00:00+00:00",
+    )
+    cache.append_live("s", live)
+    cache.ingest("s", [nm("a"), nm("b")])  # disk copies carry no timestamp
+    ts = {m.uuid: m.timestamp for m in cache.get("s")}
+    assert ts["a"] == "2026-01-01T00:00:00+00:00"  # preserved across re-read
+    assert ts["b"] is None
+
+
 def test_cache_drop():
     cache = TranscriptCache()
     cache.ingest("s", [nm("a")])

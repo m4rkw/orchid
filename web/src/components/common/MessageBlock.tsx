@@ -7,6 +7,16 @@ import { Markdown } from "./Markdown";
 /** Fetches the untruncated version of the enclosing message (parent swaps it in). */
 export type ShowFullFn = () => Promise<void> | void;
 
+/** Prefix of the auto-resume prompt (kept in sync with driver_manager.RESUME_MARKER). */
+const RESUME_MARKER = "⟳ orchid process restarted";
+
+/** Local-time tooltip for a message's receipt timestamp, or undefined if unknown. */
+function tsTitle(message: NormalizedMessage): string | undefined {
+  if (!message.timestamp) return undefined;
+  const d = new Date(message.timestamp);
+  return Number.isNaN(d.getTime()) ? undefined : d.toLocaleString();
+}
+
 export function MessageRow({
   message,
   onShowFull,
@@ -20,9 +30,15 @@ export function MessageRow({
 }) {
   switch (message.role) {
     case "user": {
+      const text = messageText(message);
+      // The auto-resume nudge is a real user-role turn; show it as a system
+      // banner, not a prompt bubble, so it isn't mistaken for something you sent.
+      if (text.startsWith(RESUME_MARKER)) {
+        return <ResumeBanner animate={animate} title={tsTitle(message)} />;
+      }
       const toolResults = message.blocks.filter((b) => b.type === "tool_result");
       // Tool results come back as user-role messages; render them as chips, not a prompt bubble.
-      if (toolResults.length > 0 && !messageText(message)) {
+      if (toolResults.length > 0 && !text) {
         return (
           <div className={clsx(animate && "fade-up", "flex max-w-[85%] flex-col gap-1.5")}>
             {toolResults.map((b, i) => (
@@ -33,12 +49,13 @@ export function MessageRow({
       }
       return (
         <div
+          title={tsTitle(message)}
           className={clsx(
             animate && "fade-up",
             "ml-auto max-w-[80%] rounded-2xl rounded-br-sm border border-violet-500/30 bg-violet-600/15 px-3.5 py-2 text-sm break-words whitespace-pre-wrap text-zinc-100",
           )}
         >
-          {messageText(message)}
+          {text}
         </div>
       );
     }
@@ -46,12 +63,12 @@ export function MessageRow({
       return <AssistantMessage message={message} onShowFull={onShowFull} animate={animate} />;
     case "system":
       return (
-        <div className={clsx(animate && "fade-up", "mx-auto max-w-[85%] text-center text-xs text-zinc-500 italic")}>
+        <div title={tsTitle(message)} className={clsx(animate && "fade-up", "mx-auto max-w-[85%] text-center text-xs text-zinc-500 italic")}>
           {messageText(message) || "system"}
         </div>
       );
     case "result":
-      return <ResultDivider text={messageText(message) || "turn done"} animate={animate} />;
+      return <ResultDivider text={messageText(message) || "turn done"} animate={animate} title={tsTitle(message)} />;
   }
 }
 
@@ -67,7 +84,7 @@ function AssistantMessage({
   const blocks = message.blocks.filter((b) => b.type !== "text" || (b.text ?? "").trim() !== "");
   if (blocks.length === 0) return null;
   return (
-    <div className={clsx(animate && "fade-up", "max-w-[88%]")}>
+    <div title={tsTitle(message)} className={clsx(animate && "fade-up", "max-w-[88%]")}>
       {message.agent_id && (
         <div className="mb-1 pl-1 font-mono text-[10px] text-zinc-600">agent {message.agent_id.slice(0, 8)}</div>
       )}
@@ -193,12 +210,28 @@ function ToolResultChip({ block, onShowFull }: { block: Block; onShowFull?: Show
   );
 }
 
-export function ResultDivider({ text, animate = true }: { text: string; animate?: boolean }) {
+export function ResultDivider({ text, animate = true, title }: { text: string; animate?: boolean; title?: string }) {
   return (
-    <div className={clsx(animate && "fade-up", "my-0.5 flex items-center gap-3 text-[11px] text-zinc-500")}>
+    <div title={title} className={clsx(animate && "fade-up", "my-0.5 flex items-center gap-3 text-[11px] text-zinc-500")}>
       <div className="h-px flex-1 bg-zinc-800" />
       <span className="shrink-0">{text}</span>
       <div className="h-px flex-1 bg-zinc-800" />
+    </div>
+  );
+}
+
+/** Banner for the auto-resume turn injected after an orchid process restart. */
+function ResumeBanner({ animate, title }: { animate?: boolean; title?: string }) {
+  return (
+    <div
+      title={title}
+      className={clsx(
+        animate && "fade-up",
+        "mx-auto flex max-w-[85%] items-center justify-center gap-2 rounded-full border border-violet-500/30 bg-violet-500/5 px-3 py-1 text-[11px] text-violet-300/90",
+      )}
+    >
+      <span className="text-violet-400/80">⟳</span>
+      orchid process restarted — auto-resuming
     </div>
   );
 }

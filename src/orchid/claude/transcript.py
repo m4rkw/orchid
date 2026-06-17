@@ -1,5 +1,6 @@
 import json
 import uuid as uuidlib
+from datetime import datetime, timezone
 from typing import Any
 
 from claude_agent_sdk import (
@@ -53,6 +54,10 @@ def _live_uuid() -> str:
     return _LIVE_PREFIX + uuidlib.uuid4().hex
 
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 def normalize_stream_message(msg: Any, cap: int = PREVIEW_CAP) -> NormalizedMessage | None:
     """Map an SDK stream message to the wire model; None = nothing to render."""
     if isinstance(msg, SystemMessage):
@@ -79,6 +84,7 @@ def normalize_stream_message(msg: Any, cap: int = PREVIEW_CAP) -> NormalizedMess
             role="assistant",
             agent_id=None,
             blocks=blocks,
+            timestamp=_now_iso(),
         )
 
     if isinstance(msg, UserMessage):
@@ -102,7 +108,8 @@ def normalize_stream_message(msg: Any, cap: int = PREVIEW_CAP) -> NormalizedMess
                     )
         if not blocks:
             return None
-        return NormalizedMessage(uuid=msg.uuid or _live_uuid(), role="user", agent_id=None, blocks=blocks)
+        return NormalizedMessage(uuid=msg.uuid or _live_uuid(), role="user", agent_id=None,
+                                 blocks=blocks, timestamp=_now_iso())
 
     if isinstance(msg, ResultMessage):
         parts = ["turn done"]
@@ -114,6 +121,7 @@ def normalize_stream_message(msg: Any, cap: int = PREVIEW_CAP) -> NormalizedMess
             role="result",
             agent_id=None,
             blocks=[Block(type="text", text=" · ".join(parts))],
+            timestamp=_now_iso(),
         )
 
     return None  # StreamEvent / RateLimitEvent etc. arrive in M3
@@ -218,6 +226,12 @@ class TranscriptCache:
             m for m in messages
             if m.uuid not in disk_uuids and not m.uuid.startswith(_LIVE_PREFIX)
         ]
+        # Carry live-observed receipt timestamps onto the re-read disk copies (the
+        # SDK doesn't surface them), so navigating away/back doesn't lose them.
+        prior_ts = {m.uuid: m.timestamp for m in messages if m.timestamp}
+        for m in normalized:
+            if m.timestamp is None and m.uuid in prior_ts:
+                m.timestamp = prior_ts[m.uuid]
         messages.clear()
         messages.extend(normalized)
         messages.extend(live_only)

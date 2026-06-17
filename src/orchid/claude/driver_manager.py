@@ -29,6 +29,15 @@ log = logging.getLogger(__name__)
 PERMISSION_TIMEOUT_S = 300.0
 POST_BURST_GRACE_S = 2.0
 
+# Prompt sent to nudge a session back to life after an orchid restart. It is a
+# real transcript turn (so it survives reseeds), but begins with this marker so
+# the UI renders it as a "process restarted — auto-resuming" banner rather than a
+# user message. Keep the marker in sync with the frontend (RESUME_MARKER).
+RESUME_MARKER = "⟳ orchid process restarted"
+RESUME_PROMPT = (
+    f"{RESUME_MARKER} — auto-resuming. Continue the previous task where you left off."
+)
+
 # Provably read-only tools auto-approved without prompting: they cannot mutate
 # state, so gating them only burns the approval window on diagnostics. Kept
 # deliberately narrow — only tools that are read-only by construction. Bash is
@@ -437,7 +446,7 @@ class DriverManager:
                     continue
                 driver = self._build_driver(root, project_id, session_id=sid)
                 self._register(sid, driver, project_id, root)
-                await driver.prompt("continue")
+                await driver.prompt(RESUME_PROMPT)
                 log.info("auto-resumed session %s (project %s)", sid, project_id)
             except Exception:
                 log.warning("auto-resume failed for %s", sid, exc_info=True)

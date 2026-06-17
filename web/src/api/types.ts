@@ -172,6 +172,8 @@ export type NormalizedMessage = {
   role: "user" | "assistant" | "system" | "result";
   agent_id: string | null;
   blocks: Block[];
+  /** ISO receipt time (live-observed); null for at-rest messages read from disk. */
+  timestamp?: string | null;
 };
 
 export type WsEvent = {

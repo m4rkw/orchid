@@ -59,7 +59,7 @@ function turnDivider(payload: Record<string, unknown>): NormalizedMessage {
   if (cost !== undefined) parts.push(`$${cost.toFixed(4)}`);
   if (duration !== undefined) parts.push(`${(duration / 1000).toFixed(1)}s`);
   if (numTurns !== undefined) parts.push(`${numTurns} ${numTurns === 1 ? "turn" : "turns"}`);
-  return { uuid: localUuid(), role: "result", agent_id: null, blocks: [{ type: "text", text: parts.join(" · ") }] };
+  return { uuid: localUuid(), role: "result", agent_id: null, blocks: [{ type: "text", text: parts.join(" · ") }], timestamp: new Date().toISOString() };
 }
 
 /** A permission card as kept in the store (payload + client-side lifecycle flag). */
@@ -279,7 +279,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         choices: [], // any pending quick-reply is now answered/superseded by this prompt
         messages: [
           ...s.onboarding.messages,
-          { uuid: localUuid(), role: "user", agent_id: null, blocks: [{ type: "text", text }] },
+          { uuid: localUuid(), role: "user", agent_id: null, blocks: [{ type: "text", text }], timestamp: new Date().toISOString() },
         ],
       },
     })),
@@ -359,6 +359,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         role: "user",
         agent_id: null,
         blocks: [{ type: "text", text }],
+        timestamp: new Date().toISOString(),
       };
       return {
         sessionBuffers: {

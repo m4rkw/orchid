@@ -106,3 +106,7 @@ class NormalizedMessage(BaseModel):
     role: Literal["user", "assistant", "system", "result"]
     agent_id: str | None = None
     blocks: list[Block]
+    # ISO-8601 receipt time, stamped when Orchid first observes the message live.
+    # None for at-rest messages read back from disk (the SDK doesn't surface the
+    # transcript's per-message timestamp); preserved across in-process re-reads.
+    timestamp: str | None = None
