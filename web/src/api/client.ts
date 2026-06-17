@@ -15,6 +15,8 @@ import type {
   ProjectUpdate,
   ProjectUsage,
   PromptAccepted,
+  InboxItem,
+  InboxStatus,
   ReviewRequest,
   RoleTemplate,
   SessionDetail,
@@ -246,6 +248,36 @@ export const api = {
     request<ReviewRequest>(
       `/api/projects/${encodeURIComponent(pid)}/reviews/${encodeURIComponent(rid)}/reject`,
       { method: "POST", body: JSON.stringify({ notes: notes ?? null }) },
+    ),
+
+  // -- inbox -----------------------------------------------------------------
+
+  inboxAll: (status?: InboxStatus, source?: string) => {
+    const q = new URLSearchParams();
+    if (status) q.set("status", status);
+    if (source) q.set("source", source);
+    const qs = q.toString();
+    return request<InboxItem[]>(`/api/inbox${qs ? `?${qs}` : ""}`);
+  },
+
+  projectInbox: (pid: string, status?: InboxStatus, source?: string) => {
+    const q = new URLSearchParams();
+    if (status) q.set("status", status);
+    if (source) q.set("source", source);
+    const qs = q.toString();
+    return request<InboxItem[]>(`/api/projects/${encodeURIComponent(pid)}/inbox${qs ? `?${qs}` : ""}`);
+  },
+
+  resolveInboxItem: (pid: string, id: string, optionId: string, payload?: Record<string, unknown>) =>
+    request<InboxItem>(
+      `/api/projects/${encodeURIComponent(pid)}/inbox/${encodeURIComponent(id)}/resolve`,
+      { method: "POST", body: JSON.stringify(payload !== undefined ? { option_id: optionId, payload } : { option_id: optionId }) },
+    ),
+
+  dismissInboxItem: (pid: string, id: string) =>
+    request<InboxItem>(
+      `/api/projects/${encodeURIComponent(pid)}/inbox/${encodeURIComponent(id)}/dismiss`,
+      { method: "POST" },
     ),
 
   onboardingPrompt: (prompt: string) =>

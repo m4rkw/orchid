@@ -18,6 +18,12 @@ def homes(tmp_path, monkeypatch):
     claude_config.mkdir()
     monkeypatch.setenv("ORCHID_HOME", str(orchid_home))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_config))
+    # Clear any host Pushover env so notifier-disabled tests are deterministic
+    # regardless of the machine's real Pushover config (Settings reads both the
+    # ORCHID_* aliases and the bare PUSHOVER_* names).
+    for var in ("ORCHID_PUSHOVER_TOKEN", "ORCHID_PUSHOVER_USER",
+                "PUSHOVER_APP_KEY", "PUSHOVER_USER_KEY"):
+        monkeypatch.delenv(var, raising=False)
     return SimpleNamespace(orchid_home=orchid_home, claude_config=claude_config, tmp=tmp_path)
 
 

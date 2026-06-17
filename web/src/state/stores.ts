@@ -18,7 +18,9 @@ import { queryClient } from "./queryClient";
 export type ProjectSelection = { pid: string; sid?: string; compose?: boolean; settings?: boolean; plans?: boolean; reviews?: boolean; reviewId?: string; spec?: boolean; architecture?: boolean; drillAgentId?: string };
 export type CollabSelection = { collab: string };
 export type NewCollabSelection = { newCollab: true };
-export type Selection = ProjectSelection | CollabSelection | NewCollabSelection | null;
+/** Global, unified inbox across all projects (not nested under a project). */
+export type InboxSelection = { inbox: true; inboxId?: string };
+export type Selection = ProjectSelection | CollabSelection | NewCollabSelection | InboxSelection | null;
 
 export function isProjectSel(s: Selection): s is ProjectSelection {
   return s !== null && "pid" in s;
@@ -28,6 +30,9 @@ export function isCollabSel(s: Selection): s is CollabSelection {
 }
 export function isNewCollabSel(s: Selection): s is NewCollabSelection {
   return s !== null && "newCollab" in s;
+}
+export function isInboxSel(s: Selection): s is InboxSelection {
+  return s !== null && "inbox" in s;
 }
 
 /** Concatenated text-block content of a message ("" if it has none). */
@@ -134,6 +139,8 @@ type AppState = {
   collabBuffers: Record<string, CollabBuffer>;
 
   select: (selected: Selection) => void;
+  /** Select the global, all-projects inbox (optionally focused on one item). */
+  selectInbox: (inboxId?: string) => void;
   focusComposer: () => void;
   appendOnboardingUser: (text: string) => void;
   setOnboardingError: (message: string | null) => void;
@@ -264,6 +271,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
   collabBuffers: {},
 
   select: (selected) => {
+    saveSelection(selected);
+    set({ selected });
+  },
+
+  selectInbox: (inboxId) => {
+    const selected: Selection = inboxId ? { inbox: true, inboxId } : { inbox: true };
     saveSelection(selected);
     set({ selected });
   },
@@ -609,6 +622,23 @@ export const useAppStore = create<AppState>()((set, get) => ({
               body: typeof payload.branch === "string" ? payload.branch : "A branch is ready for review",
               tag: `review:${reviewId}`,
               onClick: () => get().select({ pid, reviews: true, reviewId }),
+            });
+          }
+          break;
+        }
+        case "inbox_created":
+        case "inbox_resolved": {
+          const pid = payload.project_id as string;
+          const item = payload.item as { id?: string; title?: string } | undefined;
+          void queryClient.invalidateQueries({ queryKey: ["inbox"] });
+          if (pid) void queryClient.invalidateQueries({ queryKey: ["inbox", pid] });
+          if (type === "inbox_created" && item?.id) {
+            const id = item.id;
+            notify({
+              title: "Orchid — inbox",
+              body: typeof item.title === "string" ? item.title : "A new item needs your input",
+              tag: `inbox:${id}`,
+              onClick: () => get().selectInbox(id),
             });
           }
           break;

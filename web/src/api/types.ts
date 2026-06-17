@@ -326,3 +326,28 @@ export type ReviewRequest = {
     lines: string[];
   } | null;
 };
+
+export type InboxStatus = "pending" | "resolved" | "dismissed";
+
+export type InboxOption = {
+  id: string;
+  label: string;
+  detail: string | null;
+};
+
+export type InboxItem = {
+  id: string;
+  project_id: string;
+  source: string;
+  kind: string | null;
+  title: string;
+  body: string | null;
+  group_id: string | null;
+  group_label: string | null;
+  options: InboxOption[];
+  context: Record<string, unknown>;
+  status: InboxStatus;
+  resolution: { option_id: string; payload: Record<string, unknown>; resolved_at: string } | null;
+  created_at: string;
+  resolved_at: string | null;
+};

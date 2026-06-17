@@ -4,7 +4,7 @@ import { clsx } from "clsx";
 import { api, ApiError } from "../../api/client";
 import type { AgentInfo, CollabSummary, Project, SessionSummary } from "../../api/types";
 import { queryClient } from "../../state/queryClient";
-import { isCollabSel, isProjectSel, useAppStore } from "../../state/stores";
+import { isCollabSel, isInboxSel, isProjectSel, useAppStore } from "../../state/stores";
 import { AgentDot } from "../session/AgentPanel";
 import { RelativeTime } from "../common/RelativeTime";
 import { StatusDot } from "../common/StatusDot";
@@ -67,6 +67,8 @@ export function ProjectTree() {
         Console
       </button>
 
+      <InboxEntry />
+
       <CollabSection />
 
       <div className="flex shrink-0 items-center justify-between px-3 pt-2 pb-2">
@@ -91,6 +93,39 @@ export function ProjectTree() {
         {projects && <ProjectList projects={projects} expanded={expanded} toggle={toggle} />}
       </div>
     </div>
+  );
+}
+
+function InboxEntry() {
+  const { data } = useQuery({
+    queryKey: ["inbox"],
+    queryFn: () => api.inboxAll("pending"),
+    refetchInterval: 60_000,
+  });
+  const selectInbox = useAppStore((s) => s.selectInbox);
+  const selected = useAppStore((s) => s.selected);
+  const isActive = isInboxSel(selected);
+  const count = data?.length ?? 0;
+
+  return (
+    <button
+      type="button"
+      onClick={() => selectInbox()}
+      className={clsx(
+        "mx-2 mb-1 flex shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+        isActive
+          ? "bg-violet-500/10 text-violet-300"
+          : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
+      )}
+    >
+      <span className="text-violet-400/80">⌶</span>
+      Inbox
+      {count > 0 && (
+        <span className="ml-auto rounded-full bg-amber-500/20 px-1.5 py-px text-[10px] font-medium text-amber-300">
+          {count}
+        </span>
+      )}
+    </button>
   );
 }
 
