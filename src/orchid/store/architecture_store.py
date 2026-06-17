@@ -1,31 +1,41 @@
-"""Single living architecture definition per project at <root>/.orchid/architecture.json.
+"""Single living architecture definition per project at <root>/.orchid/architecture.md.
 
-The architecture describes HOW the system is built — its structure, components,
-boundaries, and the decisions that shape them. It PRECEDES and INFORMS the
-specification: the architecture is the foundation (how it's built), the spec is
-what it should do. Both are living documents; agents keep them current, and the
-spec must stay consistent with the architecture. Same storage pattern as
-spec_store / plan_store: thin persistence, atomic writes.
+The architecture describes HOW the system is built (structure, components,
+boundaries, key decisions). It PRECEDES and INFORMS the specification. Stored as
+markdown (JSON frontmatter + body) so it versions cleanly in git; legacy
+architecture.json is read as a fallback and migrated to .md on the next write.
 """
 
 from pathlib import Path
 from typing import Any
 
-from .jsonio import atomic_write_json, load_json
+from .jsonio import load_json
+from .markdown_doc import read_doc, write_doc
 from .project_store import ensure_orchid_gitignore, orchid_dir
 
 
 def architecture_path(root: Path) -> Path:
+    return orchid_dir(root) / "architecture.md"
+
+
+def _legacy_path(root: Path) -> Path:
     return orchid_dir(root) / "architecture.json"
 
 
 def read_architecture(root: Path) -> dict[str, Any] | None:
-    data = load_json(architecture_path(root), default=None)
-    return data if isinstance(data, dict) and data.get("content") is not None else None
+    data = read_doc(architecture_path(root))
+    if data and data.get("content") is not None:
+        return data
+    legacy = load_json(_legacy_path(root), default=None)  # pre-markdown fallback
+    return legacy if isinstance(legacy, dict) and legacy.get("content") is not None else None
 
 
 def write_architecture(root: Path, arch: dict[str, Any]) -> None:
-    path = architecture_path(root)
-    path.parent.mkdir(parents=True, exist_ok=True)
     ensure_orchid_gitignore(root)  # keep the doc tracked in git
-    atomic_write_json(path, arch)
+    write_doc(architecture_path(root), arch)
+    legacy = _legacy_path(root)
+    if legacy.exists():  # migrated to markdown — drop the old json
+        try:
+            legacy.unlink()
+        except OSError:
+            pass

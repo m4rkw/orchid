@@ -52,8 +52,8 @@ _ORCHID_GITIGNORE = (
     "# documents (architecture + spec), which are checked into git.\n"
     "*\n"
     "!.gitignore\n"
-    "!architecture.json\n"
-    "!spec.json\n"
+    "!architecture.md\n"
+    "!spec.md\n"
 )
 
 

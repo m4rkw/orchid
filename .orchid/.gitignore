@@ -2,5 +2,5 @@
 # documents (architecture + spec), which are checked into git.
 *
 !.gitignore
-!architecture.json
-!spec.json
+!architecture.md
+!spec.md

@@ -8,7 +8,7 @@ def test_init_project_writes_state(tmp_path):
     assert data["id"] == "prj_x"
     assert data["name"] == "Demo"
     gi = (tmp_path / ".orchid" / ".gitignore").read_text()
-    assert "*\n" in gi and "!spec.json" in gi and "!architecture.json" in gi  # docs tracked
+    assert "*\n" in gi and "!spec.md" in gi and "!architecture.md" in gi  # docs tracked
     on_disk = json.loads((tmp_path / ".orchid" / "project.json").read_text())
     assert on_disk["settings"]["permission_mode"] == "acceptEdits"
 
@@ -19,7 +19,7 @@ def test_writing_a_spec_untracks_only_docs(tmp_path):
     spec_store.write_spec(tmp_path, {"version": 1, "title": "S", "content": "x", "status": "active"})
     gi = (tmp_path / ".orchid" / ".gitignore").read_text()
     # docs un-ignored; everything else (plans/reviews/sessions/usage) still ignored
-    assert "!spec.json" in gi and "!architecture.json" in gi
+    assert "!spec.md" in gi and "!architecture.md" in gi
     assert "!sessions.json" not in gi and "!plans" not in gi
 
 

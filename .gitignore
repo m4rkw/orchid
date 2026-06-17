@@ -6,7 +6,7 @@ node_modules/
 web/dist/
 # Orchid state is local — except the living documents (architecture + spec).
 .orchid/*
-!.orchid/architecture.json
-!.orchid/spec.json
+!.orchid/architecture.md
+!.orchid/spec.md
 .DS_Store
 .claude/

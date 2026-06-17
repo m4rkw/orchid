@@ -9,6 +9,37 @@ def _text_of(result):
     return result["content"][0]["text"]
 
 
+def test_markdown_doc_roundtrip_handles_special_titles(tmp_path):
+    from orchid.store.markdown_doc import read_doc, write_doc
+    p = tmp_path / "d.md"
+    write_doc(p, {"version": 1, "title": "A: B — c", "status": "active",
+                  "content": "# H\n\nbody: with a colon\n"})
+    got = read_doc(p)
+    assert got["title"] == "A: B — c" and got["version"] == 1
+    assert "body: with a colon" in got["content"]
+    # the body is human-readable markdown on disk, not an escaped JSON string
+    raw = p.read_text()
+    assert "\n# H\n" in raw and "\\n" not in raw
+
+
+def test_legacy_json_is_read_and_migrated(tmp_path):
+    import json as _json
+    from orchid.store.project_store import orchid_dir
+    d = orchid_dir(tmp_path)
+    d.mkdir(parents=True)
+    legacy = d / "architecture.json"
+    legacy.write_text(_json.dumps(
+        {"version": 2, "title": "A", "content": "legacy body", "status": "active"}))
+    # read falls back to the legacy json
+    got = architecture_store.read_architecture(tmp_path)
+    assert got and got["content"] == "legacy body" and got["version"] == 2
+    # writing migrates to markdown and removes the json
+    architecture_store.write_architecture(tmp_path, got)
+    assert architecture_store.architecture_path(tmp_path).exists()
+    assert not legacy.exists()
+    assert architecture_store.read_architecture(tmp_path)["content"] == "legacy body"
+
+
 def test_store_roundtrip(tmp_path):
     assert architecture_store.read_architecture(tmp_path) is None
     architecture_store.write_architecture(
@@ -16,7 +47,7 @@ def test_store_roundtrip(tmp_path):
     )
     a = architecture_store.read_architecture(tmp_path)
     assert a["content"] == "X"
-    assert architecture_store.architecture_path(tmp_path).name == "architecture.json"
+    assert architecture_store.architecture_path(tmp_path).name == "architecture.md"
 
 
 @pytest.mark.asyncio
