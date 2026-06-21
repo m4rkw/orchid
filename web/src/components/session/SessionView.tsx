@@ -89,7 +89,11 @@ export function SessionView({ pid, sid }: { pid: string; sid: string }) {
   const lastTurnCost = buffer?.lastTurn?.cost;
   const title = detail.data?.title || `${sid.slice(0, 8)}…`;
 
-  const [agentsOpen, setAgentsOpen] = useState(true);
+  // Default the 240px agents panel open only on wide screens; on phones/small
+  // tablets (< lg) it would squash the transcript, so start hidden there. The
+  // header "agents N" button still toggles it. Lazy init: evaluated once on mount.
+  const [agentsOpen, setAgentsOpen] = useState(
+    () => typeof window === "undefined" || window.innerWidth >= 1024);
   const [verbose, setVerbose] = useState(false);
   const [drillAgentId, setDrillAgentId] = useState<string | null>(null);
   const drillAgent = drillAgentId === null ? null : (agents ?? []).find((a) => a.agent_id === drillAgentId) ?? null;
