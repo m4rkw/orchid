@@ -32,7 +32,7 @@ export default function App() {
   useEffect(() => setSidebarOpen(false), [selected]);
 
   return (
-    <div className="flex h-screen flex-col bg-ink-950 text-zinc-200">
+    <div className="flex h-dvh flex-col bg-ink-950 text-zinc-200">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-zinc-800 px-4">
         <div className="flex items-center gap-2 select-none">
           <button
