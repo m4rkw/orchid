@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { api } from "../../api/client";
@@ -138,6 +138,49 @@ function InboxGroup({
   );
 }
 
+/** A free-text inbox item (kind === "input"): type a value, press Enter. */
+function InboxInput({ item, disabled }: { item: InboxItem; disabled: boolean }) {
+  const [value, setValue] = useState("");
+  const submit = useMutation({
+    mutationFn: (v: string) =>
+      api.resolveInboxItem(item.project_id, item.id, "submit", { value: v }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["inbox"] }),
+  });
+  const busy = disabled || submit.isPending;
+  const trimmed = value.trim();
+  return (
+    <form
+      className="mt-2 flex gap-1.5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (trimmed) submit.mutate(trimmed);
+      }}
+    >
+      <input
+        autoFocus
+        type="text"
+        value={value}
+        disabled={busy}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="Type a value and press Enter…"
+        className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-amber-500/50 focus:outline-none disabled:opacity-50"
+      />
+      <button
+        type="submit"
+        disabled={busy || !trimmed}
+        className="shrink-0 rounded bg-zinc-800 px-2.5 py-1 text-xs text-zinc-200 hover:bg-zinc-700 disabled:opacity-50"
+      >
+        {submit.isPending ? "Saving…" : "Save"}
+      </button>
+      {submit.isError && (
+        <p className="mt-1 text-[11px] text-red-400">
+          {submit.error instanceof Error ? submit.error.message : "Failed"}
+        </p>
+      )}
+    </form>
+  );
+}
+
 function InboxRow({ item, focused }: { item: InboxItem; focused: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -186,6 +229,8 @@ function InboxRow({ item, focused }: { item: InboxItem; focused: boolean }) {
           {dismiss.isPending ? "Dismissing…" : "Dismiss"}
         </button>
       </div>
+
+      {item.kind === "input" && <InboxInput item={item} disabled={busy} />}
 
       {item.options.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
